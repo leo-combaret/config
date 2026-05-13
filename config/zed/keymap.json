@@ -1,0 +1,78 @@
+// For information on binding keys, see the Zed
+// documentation: https://zed.dev/docs/key-bindings
+// To see the default key bindings run `zed: open default keymap` from the command palette.
+[
+  {
+    "bindings": {
+      "alt-1": "project_panel::ToggleFocus",
+      "alt-2": "git_panel::ToggleFocus",
+      "alt-3": "pane::DeploySearch",
+
+      "cmd-t": "workspace::NewTerminal",
+      "cmd-shift-j": "workspace::ToggleZoom",
+      "f18": "workspace::ToggleRightDock",
+    },
+  },
+  {
+    "context": "Editor",
+    "bindings": {
+      "cmd-e": "git_panel::ToggleFocus",
+
+      "cmd-n": "pane::TogglePinTab",
+      "cmd-m": "editor::FoldAll",
+      "cmd-shift-m": "editor::UnfoldAll",
+
+      "alt-shift-c": "workspace::CopyPath",
+      "cmd-shift-c": "workspace::CopyRelativePath",
+    },
+  },
+  {
+    "context": "Terminal",
+    "use_key_equivalents": true,
+    "bindings": {
+      "cmd-1": ["terminal::SendText", "\u001b1"],
+      "cmd-2": ["terminal::SendText", "\u001b2"],
+      "cmd-3": ["terminal::SendText", "\u001b3"],
+      "cmd-4": ["terminal::SendText", "\u001b4"],
+      "cmd-<": ["terminal::SendText", "\u001b,"],
+      "cmd-;": ["terminal::SendText", "\u001b;"],
+      "cmd-:": ["terminal::SendText", "\u001b:"],
+      "cmd-\\": ["terminal::SendText", "\u001bn"],
+      "cmd-|": ["terminal::SendText", "\u001b\\"],
+      "cmd-alt-w": ["terminal::SendText", "\u001bw"],
+      "alt-left": ["terminal::SendText", "\u001bb"],
+      "alt-right": ["terminal::SendText", "\u001bf"],
+      "alt-up": ["terminal::SendKeystroke", "up"],
+      "alt-down": ["terminal::SendKeystroke", "down"],
+    },
+  },
+  {
+    "context": "GitPanel",
+    "bindings": {
+      "cmd-shift-enter": "git::Push",
+    },
+  },
+  {
+    "context": "GitPanel",
+    "unbind": {
+      "ctrl-g up": "git::Push",
+    },
+  },
+  {
+    "bindings": {
+      "alt-shift-enter": "git::Add",
+    },
+  },
+  {
+    "context": "GitPanel",
+    "bindings": {
+      "alt-enter": "git::StageAll"
+    }
+  },
+  {
+    "context": "GitPanel",
+    "unbind": {
+      "ctrl-cmd-y": "git::StageAll"
+    }
+  }
+]

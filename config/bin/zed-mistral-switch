@@ -1,0 +1,28 @@
+#!/bin/zsh
+set -euo pipefail
+
+project="${1:-}"
+
+case "$project" in
+  dashboard|seattle|budapest|dakar)
+    ;;
+  *)
+    print -u2 "usage: zed-mistral-switch dashboard|seattle|budapest|dakar"
+    exit 64
+    ;;
+esac
+
+project_path="$HOME/mistral/$project"
+zed_cli="/Applications/Zed.app/Contents/MacOS/cli"
+
+if [[ ! -d "$project_path" ]]; then
+  print -u2 "missing project directory: $project_path"
+  exit 66
+fi
+
+if [[ ! -x "$zed_cli" ]]; then
+  print -u2 "missing Zed CLI: $zed_cli"
+  exit 69
+fi
+
+"$zed_cli" --existing "$project_path" >/dev/null 2>&1 &

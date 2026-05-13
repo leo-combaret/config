@@ -1,0 +1,12 @@
+{
+  "$schema": "./setup.schema.json",
+  "repositories": {
+    "github.com/mistralai/dashboard": {
+      "init": "pnpm i",
+      "envFiles": [
+        "infra/local/.env",
+        "albe/.env"
+      ]
+    }
+  }
+}

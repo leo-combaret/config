@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Worktree Setup Configuration",
+  "description": "Configuration for git worktree initialization per repository",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "repositories": {
+      "type": "object",
+      "description": "Map of repository identifiers to their setup configuration. Key should be the repo host/owner/name (e.g., 'github.com/owner/repo')",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "init": {
+            "type": "string",
+            "description": "Command to run after creating the worktree (e.g., 'pnpm i', 'npm install', 'yarn')"
+          },
+          "envFiles": {
+            "type": "array",
+            "description": "List of environment files to copy from main repo to worktree (relative paths)",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [".env", ".env.local"],
+              [".env", "src/.env", "packages/api/.env.local"]
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["repositories"],
+  "additionalProperties": false
+}

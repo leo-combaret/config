@@ -1,0 +1,162 @@
+# Language Support in Zed
+Zed supports hundreds of programming languages and text formats. Some work out-of-the box and others rely on 3rd party extensions.
+> The ones included out-of-the-box, natively built into Zed, are marked with *.
+## Languages with Documentation
+- Ansible
+- AsciiDoc
+- Astro
+- Bash
+- Biome
+- C *
+- C++ *
+- C#
+- Clojure
+- CSS *
+- Dart
+- Deno
+- Diff *
+- Docker
+- Elixir
+- Elm
+- Emmet
+- Erlang
+- Fish
+- GDScript
+- Gleam
+- GLSL
+- Go *
+- Groovy
+- Haskell
+- Helm
+- HTML
+- Java
+- JavaScript *
+- Julia
+- JSON *
+- Jsonnet
+- Kotlin
+- Lua
+- Luau
+- Makefile
+- Markdown *
+- Nim
+- OCaml
+- PHP
+- Prisma
+- Proto
+- PureScript
+- Python *
+- R
+- Rego
+- ReStructuredText
+- Racket
+- Roc
+- Ruby
+- Rust * (Zed's written in Rust)
+- Scala
+- Scheme
+- Shell Script
+- Svelte
+- Swift
+- Tailwind CSS *
+- Terraform
+- TOML
+- TypeScript *
+- Uiua
+- Vue
+- XML
+- YAML *
+- Yara
+- Yarn
+- Zig
+## Additional Community Language Extensions
+- Ada
+- Aiken
+- Amber
+- Assembly
+- AWK
+- Beancount
+- Bend
+- Blade
+- Blueprint
+- BQN
+- Brainfuck
+- Cadence
+- Cairo
+- Cap'n Proto
+- Cedar
+- CFEngine policy language
+- CSV
+- Cucumber/Gherkin
+- CUE
+- Curry
+- D
+- Database Markup Language (DBML)
+- Earthfile
+- EJS template
+- Elisp
+- Ember
+- Env
+- Exograph
+- Fortran
+- F#
+- Gemini gemtext
+- Git Firefly
+- GraphQL
+- Groq
+- INI
+- Java
+- Justfiles
+- LaTeX
+- Ledger
+- Less
+- LilyPond
+- Liquid
+- Log
+- Lox
+- Markdown Oxide
+- Marksman
+- Matlab
+- Meson
+- Navi
+- NeoCMake
+- Nginx
+- Nim
+- Nix
+- Noir
+- Nu
+- Odin
+- Pact
+- Pest
+- PICA200 assembly
+- Pkl
+- PlaydateSDK
+- QML
+- Rainbow CSV
+- Rego
+- Rescript
+- Roclang
+- Ron
+- Metals
+- SCSS
+- Slim
+- Slint
+- Smithy
+- Solidity
+- SQL
+- Strace
+- Swift
+- Templ
+- Tmux
+- Tree-sitter Query
+- Twig
+- Typst
+- Unison
+- UnoCSS
+- Vlang
+- Vala
+- Vale
+- Verilog
+- VHS
+- Wgsl
+- WIT

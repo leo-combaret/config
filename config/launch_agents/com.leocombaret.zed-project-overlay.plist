@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.leocombaret.zed-project-overlay</string>
+
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/leocombaret/.local/Applications/ZedProjectOverlay.app/Contents/MacOS/zed-project-overlay</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/Users/leocombaret/Library/Logs/zed-project-overlay.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/leocombaret/Library/Logs/zed-project-overlay.log</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>

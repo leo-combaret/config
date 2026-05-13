@@ -1,0 +1,12 @@
+layout {
+    pane split_direction="horizontal" {
+        pane size="30%" split_direction="vertical" {
+            pane name="cmd+1" borderless=true focus=true
+            pane name="cmd+3" borderless=true
+        }
+        pane size="70%" split_direction="vertical" {
+            pane name="cmd+2" borderless=true
+            pane name="cmd+4" borderless=true
+        }
+    }
+}
