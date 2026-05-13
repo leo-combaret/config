@@ -11,6 +11,13 @@
       "cmd-t": "workspace::NewTerminal",
       "cmd-shift-j": "workspace::ToggleZoom",
       "f18": "workspace::ToggleRightDock",
+
+      // Git
+      "alt-enter": "git::StageAll",
+      "cmd-enter": "git::Commit",
+      "cmd-shift-enter": "git::Push",
+      "alt-shift-enter": "git::ForcePush",
+      "ctrl-shift-enter": "git::Pull",
     },
   },
   {
@@ -46,33 +53,4 @@
       "alt-down": ["terminal::SendKeystroke", "down"],
     },
   },
-  {
-    "context": "GitPanel",
-    "bindings": {
-      "cmd-shift-enter": "git::Push",
-    },
-  },
-  {
-    "context": "GitPanel",
-    "unbind": {
-      "ctrl-g up": "git::Push",
-    },
-  },
-  {
-    "bindings": {
-      "alt-shift-enter": "git::Add",
-    },
-  },
-  {
-    "context": "GitPanel",
-    "bindings": {
-      "alt-enter": "git::StageAll"
-    }
-  },
-  {
-    "context": "GitPanel",
-    "unbind": {
-      "ctrl-cmd-y": "git::StageAll"
-    }
-  }
 ]
