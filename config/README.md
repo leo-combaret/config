@@ -5,9 +5,14 @@ This repo stores the local keyboard/editor setup for this machine.
 ## Contents
 
 - `karabiner/karabiner.json`: Karabiner-Elements rules.
+- `github/.gitconfig`: Git aliases and identity.
 - `zed/keymap.json`: Zed key bindings.
+- `zed/settings.json`: Zed editor and terminal settings.
+- `zed/tasks.json`: Zed task definitions.
+- `zed/scripts/copy_selection_reference.py`: helper for copying a selected line reference.
 - `zellij/config.kdl`: Zellij keybindings and pane behavior.
 - `zellij/layouts/default.kdl`: default Zellij pane layout.
+- `../scripts/zellij/zed-open-zellij.sh`: helper used by the Zed terminal task.
 - `bin/zed-mistral-switch`: helper used by Karabiner to focus Mistral Zed worktrees.
 - `apps/ZedProjectOverlay/Info.plist`: app bundle metadata for the overlay helper.
 - `overlay/ZedProjectOverlay.swift`: native overlay shown on matching Zed worktree windows.
@@ -24,7 +29,7 @@ This repo stores the local keyboard/editor setup for this machine.
 
 ## Install
 
-From this directory:
+From this directory: asd;lkfj
 
 ```sh
 ./install.sh
@@ -33,7 +38,11 @@ From this directory:
 The installer symlinks the tracked files into:
 
 - `~/.config/karabiner/karabiner.json`
+- `~/.gitconfig`
 - `~/.config/zed/keymap.json`
+- `~/.config/zed/settings.json`
+- `~/.config/zed/tasks.json`
+- `~/.config/zed/scripts/copy_selection_reference.py`
 - `~/.config/zellij/config.kdl`
 - `~/.config/zellij/layouts/default.kdl`
 - `~/.local/bin/zed-mistral-switch`

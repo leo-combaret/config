@@ -1,0 +1,15 @@
+[alias]
+	sh = "!f() { if [ $# -eq 0 ]; then git stash push --include-untracked; else git stash push --include-untracked -m \"$*\"; fi; }; f"
+	shp = "!f() { if [ $# -eq 0 ]; then git stash pop; else name=\"$*\"; ref=$(git stash list --format='%gd%x09%s' | while IFS='	' read -r stash subject; do message=${subject#*: }; if [ \"$message\" = \"$name\" ]; then printf '%s\n' \"$stash\"; break; fi; done); if [ -z \"$ref\" ]; then echo \"No stash found named: $name\" >&2; return 1; fi; git stash pop \"$ref\"; fi; }; f"
+	rb = rebase
+	rba = rebase --abort
+	r = "!f() { if [ $# -eq 0 ]; then target=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null) || { branch=$(git branch --show-current); if [ -z \"$branch\" ]; then echo \"No current branch or upstream found\" >&2; return 1; fi; target=\"origin/$branch\"; }; elif [ $# -eq 1 ]; then case \"$1\" in origin/head|origin/HEAD) target=origin/HEAD ;; *[!0-9]*) target=\"$1\" ;; *) target=\"HEAD~$1\" ;; esac; else echo \"usage: git r [N|REV]\" >&2; return 2; fi; git reset --soft \"$target\"; }; f"
+	sw = switch
+	swb = switch -c
+	ll = log --oneline
+	p = pull
+	ps = push
+	pf = push --force-with-lease
+[user]
+	email = leo.combaret@mistral.ai
+	name = leo-combaret

@@ -1,0 +1,78 @@
+// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+  "proxy": "",
+  "disable_ai": true,
+  "git_panel": {
+    "dock": "left",
+  },
+  "agent": {
+    "button": false,
+  },
+  "collaboration_panel": {
+    "button": true,
+  },
+  "title_bar": {
+    "show_menus": false,
+    "show_branch_name": true,
+    "show_branch_status_icon": true,
+  },
+  "status_bar": {
+    "cursor_position_button": false,
+    "show_active_file": false,
+  },
+  "debugger": {
+    "button": false,
+  },
+  "search": {
+    "button": false,
+  },
+  "diagnostics": {
+    "button": true,
+  },
+  "terminal": {
+    "dock": "right",
+    "button": true,
+    "shell": {
+      "with_arguments": {
+        "program": "/bin/zsh",
+        "args": ["-f"],
+      },
+    },
+    "env": {
+      "ZED_AUTO_ZELLIJ_DISABLE": "1",
+    },
+  },
+  "project_panel": {
+    "hide_hidden": false,
+    "hide_root": true,
+    "git_status_indicator": true,
+    "folder_icons": true,
+    "git_status": true,
+    "file_icons": true,
+    "entry_spacing": "standard",
+    "dock": "left",
+  },
+  "autosave": "on_focus_change",
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false,
+  },
+  "session": {
+    "trust_all_worktrees": true,
+  },
+  "icon_theme": "Material Icon Theme",
+  "ui_font_size": 16,
+  "buffer_font_size": 15,
+  "theme": {
+    "mode": "dark",
+    "light": "Ayu Light",
+    "dark": "Ayu Dark",
+  },
+}

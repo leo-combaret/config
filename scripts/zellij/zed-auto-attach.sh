@@ -1,4 +1,10 @@
 # >>> zed zellij auto-attach >>>
+_zed_auto_zellij_log() {
+  local log_file="${HOME}/.config/zed/logs/zellij-auto-attach.log"
+  mkdir -p "${log_file:h}" 2>/dev/null || return
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$log_file" 2>/dev/null
+}
+
 _zed_auto_zellij_from_zed() {
   [[ "${ZED_AUTO_ZELLIJ:-}" == "1" ]] && return 0
 
@@ -30,8 +36,17 @@ _zed_auto_zellij() {
   [[ -o interactive ]] || return
   [[ -t 1 ]] || return
   _zed_auto_zellij_from_zed || return
-  [[ -z "${ZELLIJ:-}" ]] || return
-  [[ -z "${ZED_AUTO_ZELLIJ_DISABLE:-}" ]] || return
+  if [[ -n "${ZELLIJ:-}" ]]; then
+    return
+  fi
+  if [[ -n "${ZED_AUTO_ZELLIJ_DISABLE:-}" ]]; then
+    _zed_auto_zellij_log "skip disabled pid=$$ pwd=$PWD"
+    return
+  fi
+  if [[ -n "${ZED_FILE:-}${ZED_RELATIVE_FILE:-}${ZED_ROW:-}${ZED_SELECTED_TEXT:-}" ]]; then
+    _zed_auto_zellij_log "skip zed-task-env pid=$$ pwd=$PWD zed_file=${ZED_FILE:-<unset>} zed_row=${ZED_ROW:-<unset>}"
+    return
+  fi
 
   local zellij_bin
   zellij_bin="$(command -v zellij 2>/dev/null)"
@@ -59,9 +74,10 @@ _zed_auto_zellij() {
     ((index++))
   done
 
+  _zed_auto_zellij_log "attach session=$session pid=$$ pwd=$PWD"
   "$zellij_bin" attach --create "$session"
 }
 
 _zed_auto_zellij
-unset -f _zed_auto_zellij _zed_auto_zellij_from_zed _zed_auto_zellij_session_exists _zed_auto_zellij_session_has_clients 2>/dev/null
+unset -f _zed_auto_zellij _zed_auto_zellij_log _zed_auto_zellij_from_zed _zed_auto_zellij_session_exists _zed_auto_zellij_session_has_clients 2>/dev/null
 # <<< zed zellij auto-attach <<<

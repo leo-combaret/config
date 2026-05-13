@@ -8,7 +8,7 @@
       "alt-2": "git_panel::ToggleFocus",
       "alt-3": "pane::DeploySearch",
 
-      "cmd-t": "workspace::NewTerminal",
+      "cmd-t": ["task::Spawn", { "task_name": "open zellij terminal" }],
       "cmd-shift-j": "workspace::ToggleZoom",
       "f18": "workspace::ToggleRightDock",
 
@@ -18,17 +18,19 @@
       "cmd-shift-enter": "git::Push",
       "alt-shift-enter": "git::ForcePush",
       "ctrl-shift-enter": "git::Pull",
+
+      "cmd-k": "git::Diff",
+      "cmd-shift-k": "git::BranchDiff",
     },
   },
   {
     "context": "Editor",
     "bindings": {
-      "cmd-e": "git_panel::ToggleFocus",
-
       "cmd-n": "pane::TogglePinTab",
       "cmd-m": "editor::FoldAll",
       "cmd-shift-m": "editor::UnfoldAll",
 
+      "alt-c": ["task::Spawn", { "task_name": "copy selected line reference invisible" }],
       "alt-shift-c": "workspace::CopyPath",
       "cmd-shift-c": "workspace::CopyRelativePath",
     },

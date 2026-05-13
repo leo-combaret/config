@@ -22,9 +22,15 @@ link_file() {
 }
 
 chmod +x "$repo_dir/bin/zed-mistral-switch"
+chmod +x "$repo_dir/zed/scripts/copy_selection_reference.py"
+chmod +x "$repo_dir/../scripts/zellij/zed-open-zellij.sh"
 
+link_file "$repo_dir/github/.gitconfig" "$HOME/.gitconfig"
 link_file "$repo_dir/karabiner/karabiner.json" "$HOME/.config/karabiner/karabiner.json"
 link_file "$repo_dir/zed/keymap.json" "$HOME/.config/zed/keymap.json"
+link_file "$repo_dir/zed/settings.json" "$HOME/.config/zed/settings.json"
+link_file "$repo_dir/zed/tasks.json" "$HOME/.config/zed/tasks.json"
+link_file "$repo_dir/zed/scripts/copy_selection_reference.py" "$HOME/.config/zed/scripts/copy_selection_reference.py"
 link_file "$repo_dir/zellij/config.kdl" "$HOME/.config/zellij/config.kdl"
 link_file "$repo_dir/zellij/layouts/default.kdl" "$HOME/.config/zellij/layouts/default.kdl"
 link_file "$repo_dir/bin/zed-mistral-switch" "$HOME/.local/bin/zed-mistral-switch"
@@ -53,6 +59,7 @@ fi
 
 jq empty "$repo_dir/karabiner/karabiner.json"
 zsh -n "$repo_dir/bin/zed-mistral-switch"
+zsh -n "$repo_dir/../scripts/zellij/zed-open-zellij.sh"
 zsh -n "$repo_dir/install.sh"
 if command -v zellij >/dev/null 2>&1; then
   zellij setup --check >/dev/null
