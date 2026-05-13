@@ -25,7 +25,7 @@ This repo stores the local keyboard/editor setup for this machine.
 - Right Command + `2`: open/focus `~/mistral/seattle` in Zed.
 - Right Command + `3`: open/focus `~/mistral/budapest` in Zed.
 - Right Command + `4`: open/focus `~/mistral/dakar` in Zed.
-- Matching Zed worktree windows show a top-center overlay in this order: `dashboard`, `seattle`, `budapest`, `dakar`.
+- Matching frontmost Zed worktree windows show a top-center overlay in this order: `dashboard`, `seattle`, `budapest`, `dakar`.
 
 ## Install
 

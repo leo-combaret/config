@@ -188,7 +188,7 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == zedBundleIdentifier {
             showFrontZedWindow(for: zedApplication.processIdentifier)
         } else {
-            showVisibleTargetZedWindow(for: zedApplication.processIdentifier)
+            hide()
         }
     }
 
