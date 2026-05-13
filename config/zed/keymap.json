@@ -8,7 +8,7 @@
       "alt-2": "git_panel::ToggleFocus",
       "alt-3": "pane::DeploySearch",
 
-      "cmd-t": ["task::Spawn", { "task_name": "open zellij terminal" }],
+      "cmd-t": "workspace::NewTerminal",
       "cmd-shift-j": "workspace::ToggleZoom",
       "f18": "workspace::ToggleRightDock",
 

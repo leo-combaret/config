@@ -42,11 +42,12 @@
     "shell": {
       "with_arguments": {
         "program": "/bin/zsh",
-        "args": ["-f"],
+        "args": [],
+        "title_override": "Terminal",
       },
     },
     "env": {
-      "ZED_AUTO_ZELLIJ_DISABLE": "1",
+      "ZED_AUTO_ZELLIJ": "1",
     },
   },
   "project_panel": {
