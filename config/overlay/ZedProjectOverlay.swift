@@ -11,6 +11,11 @@ private struct ProjectSpec {
     let foregroundColor: NSColor
 }
 
+private struct OnScreenWindow {
+    let pid: pid_t
+    let frame: CGRect
+}
+
 private let projects: [ProjectSpec] = [
     ProjectSpec(
         name: "dashboard",
@@ -146,6 +151,7 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.contentView = overlayView
         panel.hasShadow = false
+        panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = true
         panel.isMovable = false
         panel.isOpaque = false
@@ -185,32 +191,32 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
             return
         }
 
-        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == zedBundleIdentifier {
-            showFrontZedWindow(for: zedApplication.processIdentifier)
+        let zedIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == zedBundleIdentifier
+
+        if zedIsFrontmost {
+            if !showFrontZedWindow(for: zedApplication.processIdentifier) {
+                showVisibleTargetZedWindow(for: zedApplication.processIdentifier)
+            }
         } else {
-            hide()
+            showVisibleTargetZedWindow(for: zedApplication.processIdentifier)
         }
     }
 
-    private func showFrontZedWindow(for pid: pid_t) {
+    private func showFrontZedWindow(for pid: pid_t) -> Bool {
         guard let window = frontWindow(for: pid) else {
-            hide()
-            return
+            return false
         }
 
         guard isStandardWindow(window) else {
-            hide()
-            return
+            return false
         }
 
         guard let frame = windowFrame(window) else {
-            hide()
-            return
+            return false
         }
 
         guard let activeProject = activeProject(for: window) else {
-            hide()
-            return
+            return false
         }
 
         overlayView.setActiveProject(activeProject)
@@ -219,6 +225,7 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
+        return true
     }
 
     private func showVisibleTargetZedWindow(for pid: pid_t) {
@@ -237,6 +244,7 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
                 isStandardWindow(window),
                 let frame = windowFrame(window),
                 visibleFrames.contains(where: { approximatelySameFrame($0, frame) }),
+                isWindowTopOnItsScreen(frame, pid: pid),
                 let project = activeProject(for: window)
             else {
                 continue
@@ -252,6 +260,23 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
         }
 
         hide()
+    }
+
+    private func isWindowTopOnItsScreen(_ frame: CGRect, pid: pid_t) -> Bool {
+        let windows = orderedOnScreenWindows()
+
+        guard
+            let targetIndex = windows.firstIndex(where: { $0.pid == pid && approximatelySameFrame($0.frame, frame) }),
+            let targetScreenFrame = screenFrame(containingMostOf: frame)
+        else {
+            return false
+        }
+
+        for window in windows[..<targetIndex] where intersects(window.frame, targetScreenFrame) {
+            return false
+        }
+
+        return true
     }
 
     private func hide() {
@@ -312,28 +337,34 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
         return axElements(appElement, kAXWindowsAttribute as String)?.first
     }
 
-    private func visibleZedWindowFrames(for pid: pid_t) -> [CGRect] {
+    private func orderedOnScreenWindows() -> [OnScreenWindow] {
         guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
 
         return windowInfo.compactMap { info in
             guard
-                (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                let pid = info[kCGWindowOwnerPID as String] as? pid_t,
                 (info[kCGWindowLayer as String] as? Int) == 0,
                 let bounds = info[kCGWindowBounds as String] as? [String: Any],
                 let x = cgFloat(bounds["X"]),
                 let y = cgFloat(bounds["Y"]),
                 let width = cgFloat(bounds["Width"]),
                 let height = cgFloat(bounds["Height"]),
-                width > 300,
-                height > 200
+                width > 80,
+                height > 80
             else {
                 return nil
             }
 
-            return CGRect(x: x, y: y, width: width, height: height)
+            return OnScreenWindow(pid: pid, frame: CGRect(x: x, y: y, width: width, height: height))
         }
+    }
+
+    private func visibleZedWindowFrames(for pid: pid_t) -> [CGRect] {
+        orderedOnScreenWindows()
+            .filter { $0.pid == pid && $0.frame.width > 300 && $0.frame.height > 200 }
+            .map(\.frame)
     }
 
     private func approximatelySameFrame(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
@@ -341,6 +372,37 @@ private final class OverlayController: NSObject, NSApplicationDelegate {
             abs(lhs.origin.y - rhs.origin.y) <= 8 &&
             abs(lhs.size.width - rhs.size.width) <= 8 &&
             abs(lhs.size.height - rhs.size.height) <= 8
+    }
+
+    private func screenFrame(containingMostOf frame: CGRect) -> CGRect? {
+        let mainScreenMaxY = NSScreen.screens.first?.frame.maxY ?? 0
+
+        return NSScreen.screens
+            .map { screen -> CGRect in
+                CGRect(
+                    x: screen.frame.minX,
+                    y: mainScreenMaxY - screen.frame.maxY,
+                    width: screen.frame.width,
+                    height: screen.frame.height
+                )
+            }
+            .map { ($0, intersectionArea($0, frame)) }
+            .filter { $0.1 > 0 }
+            .max { $0.1 < $1.1 }?
+            .0
+    }
+
+    private func intersects(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        intersectionArea(lhs, rhs) > 0
+    }
+
+    private func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull, !intersection.isEmpty else {
+            return 0
+        }
+
+        return intersection.width * intersection.height
     }
 
     private func cgFloat(_ value: Any?) -> CGFloat? {
