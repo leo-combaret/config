@@ -19,6 +19,8 @@ Then render every item in `items` order:
 
 **Comment:** <comment_summary>
 
+**Actual behavior:** <actual_behavior_example>
+
 **Reflection:** <reflection>
 
 **Recommendation:** <recommendation>
@@ -28,6 +30,8 @@ Rendering rules:
 - If an item groups multiple comments, render indexes as `#1, #4 [ACCEPT] path`.
 - Keep classification labels uppercase.
 - Show the file path in every header.
+- Lead the analysis with `actual_behavior_example` before `reflection`. It should show the concrete current behavior, code path, input, state, or user action that makes the classification defensible.
+- Keep `reflection` for the concise explanation of why that behavior means ACCEPT, REJECT, or DISCUSS.
 - If `recommendation` contains code, render it in a fenced code block.
 - Keep this in the assistant message; do not write it to a file.
 - If there are no unresolved comments, say that clearly and stop the workflow.

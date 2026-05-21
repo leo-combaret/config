@@ -4,7 +4,7 @@ Goal: produce entrypoint packets containing unresolved PR review comments, PR co
 
 Treat one unresolved GitHub review thread as one comment item. A thread may contain multiple messages; keep them together under one chronological index. Sort unresolved threads by the earliest comment `createdAt` ascending and assign indexes `1, 2, 3...`.
 
-Keep raw API output and large diffs out of the user-facing response. If the multi-agent path is authorized, put large reads in subagents and keep only summarized packet output in the parent session.
+Keep raw API output and large diffs out of the user-facing response. Put large reads in subagents and keep only summarized packet output in the parent session. Use the local fallback only when subagent tools are unavailable or the user explicitly asked to run locally.
 
 ## Step 1 - Confirm PR coordinates
 
@@ -18,7 +18,7 @@ If this fails, ask the user which PR or base ref to use.
 
 ## Step 2 - Fetch unresolved comments and architecture
 
-If subagents are authorized, spawn both agents before waiting.
+Spawn both agents before waiting.
 
 ### Agent A - PR comment fetcher
 
@@ -174,11 +174,11 @@ Return markdown with this exact shape:
 
 Wait for both agents before merging.
 
-If subagents are not authorized, run the same commands locally, use `rg` for callers/tests, and build the same two reports yourself.
+If using the local fallback, run the same commands locally, use `rg` for callers/tests, and build the same two reports yourself.
 
 ## Step 3 - Merge into entrypoint packets
 
-If subagents are authorized, spawn one `default` agent to merge the unresolved comments, PR diff, and architecture map. Pass the full outputs from Agent A and Agent B into the prompt. If subagents are not authorized, do this merge locally.
+Spawn one `default` agent to merge the unresolved comments, PR diff, and architecture map. Pass the full outputs from Agent A and Agent B into the prompt. If using the local fallback, do this merge locally.
 
 Merger prompt:
 

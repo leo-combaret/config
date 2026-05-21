@@ -5,6 +5,7 @@
 	rba = rebase --abort
 	r = "!f() { if [ $# -eq 0 ]; then target=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null) || { branch=$(git branch --show-current); if [ -z \"$branch\" ]; then echo \"No current branch or upstream found\" >&2; return 1; fi; target=\"origin/$branch\"; }; elif [ $# -eq 1 ]; then case \"$1\" in origin/head|origin/HEAD) target=origin/HEAD ;; *[!0-9]*) target=\"$1\" ;; *) target=\"HEAD~$1\" ;; esac; else echo \"usage: git r [N|REV]\" >&2; return 2; fi; git reset --soft \"$target\"; }; f"
 	sw = switch
+	swp = switch -
 	swb = switch -c
 	ll = log --oneline
 	p = pull

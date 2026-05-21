@@ -16,7 +16,7 @@ If code changes are local and not pushed, still do not commit or push. Surface t
 
 Group `selected_items` by `entrypoint`. Each worker should own one entrypoint, including all files needed for the selected comments in that entrypoint.
 
-If subagents are authorized, spawn one `worker` per entrypoint before waiting. If subagents are not authorized, process one entrypoint at a time locally.
+Spawn one `worker` per entrypoint before waiting. If using the local fallback, process one entrypoint at a time locally.
 
 ## Worker prompt template
 
@@ -28,14 +28,14 @@ Entrypoint: {{ENTRYPOINT_NAME}}
 Selected items:
 {{SELECTED_ITEMS_FOR_ENTRYPOINT}}
 
-Selected items include comment indexes, thread IDs, primary database IDs when available, file paths, classifications, reflections, and recommendations.
+Selected items include comment indexes, thread IDs, primary database IDs when available, file paths, classifications, actual behavior examples, reflections, and recommendations.
 
 You are not alone in the codebase. Do not revert unrelated edits or changes made by others. Work with current file contents.
 
 Rules:
 1. For ACCEPT items, read the relevant files, make the smallest defensible code changes, and preserve unrelated behavior.
-2. For REJECT items, do not edit code unless the item also contains an accepted subpoint. Prepare a concise GitHub reply explaining the false premise or why no change is needed.
-3. For DISCUSS items, prepare or post only the clarification requested by the user. Do not resolve unless explicitly told.
+2. For REJECT items, do not edit code unless the item also contains an accepted subpoint. Prepare a concise GitHub reply grounded in the actual behavior example, explaining the false premise or why no change is needed.
+3. For DISCUSS items, prepare or post only the clarification requested by the user, grounded in the concrete scenario from the actual behavior example. Do not resolve unless explicitly told.
 4. Do not add comments like `fixed comment #3` in code.
 5. Do not commit or push.
 6. List every file you changed.

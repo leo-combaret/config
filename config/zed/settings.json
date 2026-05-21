@@ -10,6 +10,7 @@
   "proxy": "",
   "disable_ai": true,
   "git_panel": {
+    "tree_view": true,
     "dock": "left",
   },
   "agent": {
@@ -51,6 +52,7 @@
     },
   },
   "project_panel": {
+    "indent_size": 10.0,
     "hide_hidden": false,
     "hide_root": true,
     "git_status_indicator": true,

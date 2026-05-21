@@ -8,9 +8,9 @@ Do not commit, push, merge, or revert unrelated changes.
 
 Group `selected_issues` by file.
 
-If subagents are authorized, spawn one `worker` per file before waiting. Each worker owns one file's fixes. If a fix requires edits outside its file, the worker must keep them minimal and explain why. Tell every worker it is not alone in the codebase, must not revert edits made by others, and must accommodate current file contents.
+Spawn one `worker` per file before waiting. Each worker owns one file's fixes. If a fix requires edits outside its file, the worker must keep them minimal and explain why. Tell every worker it is not alone in the codebase, must not revert edits made by others, and must accommodate current file contents.
 
-If subagents are not authorized, apply the fixes locally using the same ownership rule: finish one file at a time and keep edits scoped to selected issues.
+If using the local fallback, apply the fixes locally using the same ownership rule: finish one file at a time and keep edits scoped to selected issues.
 
 ### Worker prompt template
 
@@ -52,7 +52,7 @@ List partial or skipped issues.
 
 ## Path B - Post inline PR comments
 
-If subagents are authorized, spawn one `default` agent to batch every selected issue into a single GitHub review submission. If subagents are not authorized, do the same locally.
+Spawn one `default` agent to batch every selected issue into a single GitHub review submission. If using the local fallback, do the same locally.
 
 ### Comment-poster prompt
 
@@ -62,7 +62,7 @@ Post code review feedback as inline comments on the current PR. Use the GitHub R
 ## Selected issues
 {{SELECTED_ISSUES_JSON}}
 
-Each issue has: number, file path, line, priority, category, description, suggestion.
+Each issue has: number, file path, line, priority, category, description, actual_behavior_example, suggestion.
 
 Steps:
 1. Capture PR coordinates:
@@ -83,7 +83,7 @@ Steps:
          "path": "<file path>",
          "line": <line number as integer>,
          "side": "RIGHT",
-         "body": "**[<PRIORITY>]** <Category> - <Description>\n\n**Suggested fix:**\n<suggestion>"
+         "body": "**[<PRIORITY>]** <Category>\n\n**Actual behavior:**\n<actual_behavior_example>\n\n**Problem:**\n<description>\n\n**Suggested fix:**\n<suggestion>"
        }
      ]
    }

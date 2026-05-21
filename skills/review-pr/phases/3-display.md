@@ -18,13 +18,16 @@ Then for each file in `files`:
 ## `<path>` · <issue_count> issue(s)
 
 **#<number>** · L<line> · **<priority>** · `<category>` · scope: `<scope>`
-> <description>
+**Actual behavior:** <actual_behavior_example>
+**Problem:** <description>
 **Fix:** <suggestion>
 ```
 
 Rendering rules:
 - Use the issue `number` verbatim. These are the IDs the user will reference.
 - Use bold `**MUST**`, `**SHOULD**`, and `**COULD**`.
+- Lead with `actual_behavior_example`, not the abstract explanation. It should show what currently happens with a concrete input, state, route, command, or user action, and the bad result the reviewer expects.
+- Keep `description` as the short explanation of why that behavior is wrong.
 - If `suggestion` contains code, render it in a fenced code block.
 - Keep this in the assistant message; do not write it to a file.
 - If there are no issues, say that clearly, mention any residual test or review limitations, and stop the workflow.

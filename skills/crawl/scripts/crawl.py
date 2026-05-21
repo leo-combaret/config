@@ -12,6 +12,10 @@ Flow:
 
 Usage:
   python3 crawl.py <URL> [--name NAME] [--limit N]
+  python3 crawl.py <DEEP_URL> --scope-url <DOCS_ROOT>
+  python3 crawl.py <URL> --url-file urls.txt [--cookie COOKIE]
+  python3 crawl.py <URL> --url-file urls.txt --url-file-only
+  python3 crawl.py <URL> --browser-cdp 9222 --url-file urls.txt
   python3 crawl.py check <URL>
 
 Examples:
@@ -24,12 +28,19 @@ Requirements:
 """
 
 import argparse
+import base64
+import hashlib
 import html as html_lib
 import io
 import json
 import os
 import re
+import secrets
+import socket
+import ssl
+import struct
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -282,6 +293,105 @@ BLOCKED_PAGE_EXTENSIONS = frozenset(
 
 # Shared MarkItDown instance, loaded lazily so `check` mode can run without it.
 _converter = None
+EXTRA_REQUEST_HEADERS = {}
+BROWSER_CDP = None
+BROWSER_CLIENT = None
+BROWSER_FETCH_TIMEOUT = 45
+BROWSER_NAV_SEED = None
+
+
+def request_headers(defaults):
+    """Merge caller-supplied request headers into per-request defaults."""
+    headers = dict(defaults)
+    headers.update(EXTRA_REQUEST_HEADERS)
+    return headers
+
+
+def normalize_browser_cdp(value):
+    """Normalize browser inputs to a CDP websocket endpoint when possible."""
+    if not value:
+        return None
+    if value.startswith(("ws://", "wss://")):
+        return value
+    path = Path(value).expanduser()
+    if path.is_dir():
+        endpoint = read_devtools_active_port(path)
+        if endpoint:
+            return endpoint
+
+    parsed = urlparse(value if "://" in value else "//" + value)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if not port and value.isdigit():
+        port = int(value)
+    if not port:
+        return value
+
+    endpoint = fetch_browser_websocket_url(host, port)
+    if endpoint:
+        return endpoint
+
+    endpoint = find_devtools_active_port_endpoint(host, port)
+    if endpoint:
+        return endpoint
+
+    return f"ws://{host}:{port}"
+
+
+def read_devtools_active_port(profile_dir, host="127.0.0.1"):
+    """Read Chrome's DevToolsActivePort file from a browser profile directory."""
+    active_port = Path(profile_dir) / "DevToolsActivePort"
+    try:
+        lines = active_port.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    if len(lines) < 2 or not lines[0].strip().isdigit():
+        return None
+    port = lines[0].strip()
+    path = lines[1].strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"ws://{host}:{port}{path}"
+
+
+def fetch_browser_websocket_url(host, port):
+    """Read a legacy CDP /json/version endpoint when the browser exposes one."""
+    url = f"http://{host}:{port}/json/version"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    return payload.get("webSocketDebuggerUrl")
+
+
+def find_devtools_active_port_endpoint(host, port):
+    """Find a DevToolsActivePort file matching the requested port."""
+    roots = [
+        Path.home() / "Library" / "Application Support",
+        Path.home() / ".config",
+        Path.home() / ".cache",
+    ]
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            candidates = root.rglob("DevToolsActivePort")
+        except OSError:
+            continue
+        for candidate in candidates:
+            try:
+                lines = candidate.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            if len(lines) < 2 or lines[0].strip() != str(port):
+                continue
+            path = lines[1].strip()
+            if not path.startswith("/"):
+                path = "/" + path
+            return f"ws://{host}:{port}{path}"
+    return None
 
 
 def make_soup(html):
@@ -300,10 +410,13 @@ class DiscoveryReport:
     path_sitemap_urls: Set[str] = field(default_factory=set)
     origin_sitemap_urls: Set[str] = field(default_factory=set)
     html_urls: Set[str] = field(default_factory=set)
+    file_urls: Set[str] = field(default_factory=set)
+    url_file: Optional[str] = None
     path_sitemaps_found: List[str] = field(default_factory=list)
     origin_sitemaps_found: List[str] = field(default_factory=list)
     html_pages_fetched: int = 0
     html_error: Optional[str] = None
+
 
 
 # --- Sitemap fetching ----------------------------------------
@@ -344,10 +457,12 @@ def fetch_sitemap_content(url):
     """Fetch a URL (sitemap XML) and return its content as string."""
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (compatible; CrawlSkill/1.0)",
-            "Accept": "text/xml, application/xml, */*",
-        },
+        headers=request_headers(
+            {
+                "User-Agent": "Mozilla/5.0 (compatible; CrawlSkill/1.0)",
+                "Accept": "text/xml, application/xml, */*",
+            }
+        ),
     )
     with open_url(req, timeout=30) as resp:
         return resp.read().decode("utf-8", errors="replace")
@@ -987,17 +1102,357 @@ def fetch_page(url):
     return html
 
 
+class WebSocketConnection:
+    """Small dependency-free websocket client for local Chrome DevTools."""
+
+    def __init__(self, endpoint):
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in {"ws", "wss"}:
+            raise RuntimeError(f"--browser-cdp must resolve to ws:// or wss://, got {endpoint}")
+        self.endpoint = endpoint
+        self.parsed = parsed
+        self.sock = self.connect()
+
+    def connect(self):
+        port = self.parsed.port or (443 if self.parsed.scheme == "wss" else 80)
+        raw_sock = socket.create_connection((self.parsed.hostname, port), timeout=10)
+        if self.parsed.scheme == "wss":
+            context = ssl.create_default_context()
+            raw_sock = context.wrap_socket(raw_sock, server_hostname=self.parsed.hostname)
+        raw_sock.settimeout(BROWSER_FETCH_TIMEOUT)
+
+        key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
+        path = self.parsed.path or "/"
+        if self.parsed.query:
+            path += "?" + self.parsed.query
+        host = self.parsed.hostname
+        if self.parsed.port:
+            host += f":{self.parsed.port}"
+        request = "\r\n".join(
+            [
+                f"GET {path} HTTP/1.1",
+                f"Host: {host}",
+                "Upgrade: websocket",
+                "Connection: Upgrade",
+                f"Sec-WebSocket-Key: {key}",
+                "Sec-WebSocket-Version: 13",
+                "",
+                "",
+            ]
+        )
+        raw_sock.sendall(request.encode("ascii"))
+        response = b""
+        while b"\r\n\r\n" not in response:
+            chunk = raw_sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+        if b" 101 " not in response.split(b"\r\n", 1)[0]:
+            raise RuntimeError(
+                "browser websocket handshake failed: "
+                + response.decode("utf-8", errors="replace")[:300]
+            )
+
+        accept = None
+        for header in response.decode("utf-8", errors="replace").split("\r\n"):
+            if header.lower().startswith("sec-websocket-accept:"):
+                accept = header.split(":", 1)[1].strip()
+                break
+        expected = base64.b64encode(
+            hashlib.sha1(
+                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")
+            ).digest()
+        ).decode("ascii")
+        if accept != expected:
+            raise RuntimeError("browser websocket handshake returned an invalid accept key")
+        return raw_sock
+
+    def read_exact(self, length):
+        data = b""
+        while len(data) < length:
+            chunk = self.sock.recv(length - len(data))
+            if not chunk:
+                raise RuntimeError("browser websocket closed")
+            data += chunk
+        return data
+
+    def send_json(self, payload):
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        header = bytearray([0x81])
+        if len(data) < 126:
+            header.append(0x80 | len(data))
+        elif len(data) < 65536:
+            header.append(0x80 | 126)
+            header.extend(struct.pack("!H", len(data)))
+        else:
+            header.append(0x80 | 127)
+            header.extend(struct.pack("!Q", len(data)))
+
+        mask = secrets.token_bytes(4)
+        masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(data))
+        self.sock.sendall(bytes(header) + mask + masked)
+
+    def send_pong(self, payload):
+        header = bytearray([0x8A])
+        if len(payload) < 126:
+            header.append(0x80 | len(payload))
+        elif len(payload) < 65536:
+            header.append(0x80 | 126)
+            header.extend(struct.pack("!H", len(payload)))
+        else:
+            header.append(0x80 | 127)
+            header.extend(struct.pack("!Q", len(payload)))
+        mask = secrets.token_bytes(4)
+        masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        self.sock.sendall(bytes(header) + mask + masked)
+
+    def recv_json(self):
+        parts = []
+        while True:
+            first, second = self.read_exact(2)
+            opcode = first & 0x0F
+            fin = bool(first & 0x80)
+            masked = bool(second & 0x80)
+            length = second & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self.read_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self.read_exact(8))[0]
+            mask = self.read_exact(4) if masked else b""
+            payload = self.read_exact(length) if length else b""
+            if masked:
+                payload = bytes(
+                    byte ^ mask[index % 4] for index, byte in enumerate(payload)
+                )
+
+            if opcode == 0x8:
+                raise RuntimeError("browser websocket closed")
+            if opcode == 0x9:
+                self.send_pong(payload)
+                continue
+            if opcode not in {0x0, 0x1}:
+                continue
+
+            parts.append(payload)
+            if not fin:
+                continue
+            text = b"".join(parts).decode("utf-8", errors="replace")
+            return json.loads(text)
+
+
+class CdpBrowser:
+    """Minimal CDP client that reuses one tab for rendered HTML extraction."""
+
+    def __init__(self, endpoint, nav_seed_url=None):
+        self.ws = WebSocketConnection(endpoint)
+        self.next_id = 0
+        self.session_id = None
+        self.target_id = None
+        self.last_good_url = None
+        self.nav_seed_url = nav_seed_url
+        self.create_page()
+
+    def send(self, method, params=None, session_id=None, timeout=BROWSER_FETCH_TIMEOUT):
+        self.next_id += 1
+        message = {"id": self.next_id, "method": method}
+        if params is not None:
+            message["params"] = params
+        if session_id:
+            message["sessionId"] = session_id
+        self.ws.send_json(message)
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            response = self.ws.recv_json()
+            if response.get("id") != message["id"]:
+                continue
+            if "error" in response:
+                error = response["error"]
+                raise RuntimeError(error.get("message") or str(error))
+            return response.get("result", {})
+        raise RuntimeError(f"timeout waiting for CDP method {method}")
+
+    def create_page(self):
+        result = self.send("Target.createTarget", {"url": "about:blank"})
+        self.target_id = result["targetId"]
+        attached = self.send(
+            "Target.attachToTarget",
+            {"targetId": self.target_id, "flatten": True},
+        )
+        self.session_id = attached["sessionId"]
+        self.send("Page.enable", session_id=self.session_id)
+        self.send("Runtime.enable", session_id=self.session_id)
+
+    def evaluate(self, expression, timeout=BROWSER_FETCH_TIMEOUT):
+        result = self.send(
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "awaitPromise": True,
+                "returnByValue": True,
+            },
+            session_id=self.session_id,
+            timeout=timeout,
+        )
+        if "exceptionDetails" in result:
+            details = result["exceptionDetails"]
+            raise RuntimeError(details.get("text") or "browser evaluation failed")
+        return result.get("result", {}).get("value")
+
+    def wait_until_ready(self):
+        expression = """
+(() => ({
+  state: document.readyState,
+  href: location.href,
+  title: document.title,
+  text: document.body ? document.body.innerText.slice(0, 2000) : ""
+}))()
+"""
+        deadline = time.monotonic() + BROWSER_FETCH_TIMEOUT
+        latest = {}
+        while time.monotonic() < deadline:
+            latest = self.evaluate(expression, timeout=10) or {}
+            text = latest.get("text") or ""
+            if latest.get("state") == "complete" and len(text.strip()) > 20:
+                return latest
+            time.sleep(0.4)
+        return latest
+
+    def page_is_blocked(self, text):
+        lower_text = (text or "").lower()
+        blocked_markers = [
+            "sorry, you have been blocked",
+            "access denied",
+            "http error 403",
+            "forbidden",
+        ]
+        return any(marker in lower_text for marker in blocked_markers)
+
+    def read_current_page(self):
+        info = self.wait_until_ready()
+        if self.page_is_blocked(info.get("text")):
+            raise RuntimeError("browser loaded a blocked/forbidden page")
+
+        payload = self.evaluate(
+            """
+(() => ({
+  url: location.href,
+  html: document.documentElement ? document.documentElement.outerHTML : "",
+  text: document.body ? document.body.innerText.slice(0, 2000) : ""
+}))()
+""",
+            timeout=20,
+        ) or {}
+        if self.page_is_blocked(payload.get("text")):
+            raise RuntimeError("browser loaded a blocked/forbidden page")
+
+        html = payload.get("html") or ""
+        if not html:
+            raise RuntimeError("browser returned empty HTML")
+        return html, payload.get("url") or info.get("href")
+
+    def fetch_page_via_internal_link(self, url):
+        """Fallback for WAFs that block direct loads but allow app navigation."""
+        source_urls = unique_in_order(
+            candidate
+            for candidate in [self.last_good_url, self.nav_seed_url]
+            if candidate and urlparse(candidate).netloc == urlparse(url).netloc
+        )
+        for source_url in source_urls:
+            self.send("Page.navigate", {"url": source_url}, session_id=self.session_id)
+            self.wait_until_ready()
+            payload = self.evaluate(
+                f"""
+(async () => {{
+  const target = {json.dumps(url)};
+  const normalize = (value) => {{
+    try {{
+      const parsed = new URL(value, location.href);
+      parsed.hash = "";
+      parsed.search = "";
+      return parsed.href.replace(/\\/$/, "");
+    }} catch {{
+      return "";
+    }}
+  }};
+  const normalizedTarget = normalize(target);
+  const link = Array.from(document.querySelectorAll("a[href]"))
+    .find((element) => normalize(element.href) === normalizedTarget);
+  if (!link)
+    return {{ error: "matching internal link not found", url: location.href }};
+  link.click();
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {{
+    if (normalize(location.href) === normalizedTarget)
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }}
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  return {{
+    url: location.href,
+    html: document.documentElement ? document.documentElement.outerHTML : "",
+    text: document.body ? document.body.innerText.slice(0, 2000) : "",
+  }};
+}})()
+""",
+                timeout=15,
+            ) or {}
+            if payload.get("error"):
+                continue
+            if self.page_is_blocked(payload.get("text")):
+                continue
+            html = payload.get("html") or ""
+            if not html:
+                continue
+            return html, payload.get("url") or url
+        return None
+
+    def fetch_page(self, url):
+        self.send("Page.navigate", {"url": url}, session_id=self.session_id)
+        try:
+            html, final_url = self.read_current_page()
+        except RuntimeError as e:
+            if "blocked/forbidden" not in str(e):
+                raise
+            fallback = self.fetch_page_via_internal_link(url)
+            if not fallback:
+                raise
+            html, final_url = fallback
+
+        self.last_good_url = final_url or url
+        return html, final_url or url
+
+
+def get_browser_client():
+    """Return the shared CDP client for rendered browser fetching."""
+    global BROWSER_CLIENT
+    if BROWSER_CLIENT is None:
+        endpoint = normalize_browser_cdp(BROWSER_CDP)
+        BROWSER_CLIENT = CdpBrowser(endpoint, nav_seed_url=BROWSER_NAV_SEED)
+    return BROWSER_CLIENT
+
+
+def fetch_page_with_browser(url):
+    """Fetch rendered page HTML through an existing Chrome DevTools browser."""
+    return get_browser_client().fetch_page(url)
+
+
 def fetch_page_with_final_url(url):
     """Fetch an HTML page and return (content, final URL after redirects)."""
+    if BROWSER_CDP:
+        return fetch_page_with_browser(url)
+
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-        },
+        headers=request_headers(
+            {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            }
+        ),
     )
     with open_url(req, timeout=30) as resp:
         return resp.read().decode("utf-8", errors="replace"), resp.geturl()
@@ -1007,10 +1462,6 @@ def extract_main_content(html):
     """Extract main documentation content from HTML and return as markdown."""
     soup = make_soup(html)
 
-    for selector in STRIP_SELECTORS:
-        for el in soup.select(selector):
-            el.decompose()
-
     main = None
     for selector in MAIN_SELECTORS:
         main = soup.select_one(selector)
@@ -1018,6 +1469,21 @@ def extract_main_content(html):
             break
     if not main:
         main = soup.body or soup
+
+    strip_selectors = STRIP_SELECTORS
+    if main.name not in {"body", "html"}:
+        strip_selectors = [selector for selector in STRIP_SELECTORS if selector != "header"]
+
+    for selector in strip_selectors:
+        for el in main.select(selector):
+            el.decompose()
+
+    for child in list(getattr(main, "children", [])):
+        text = clean_inline_text(child.get_text(" ", strip=True))
+        if text == "On this page":
+            child.decompose()
+        elif text.startswith("Was this page helpful?") and len(text) < 120:
+            child.decompose()
 
     raw_md = to_markdown(str(main))
 
@@ -1182,15 +1648,22 @@ def rewrite_links(content, url_to_local, path_to_local, base_url):
             return "(" + local + fragment + ")"
         return m.group(0)
 
-    # Pass 1: full absolute URLs (https://domain.com/docs/page)
-    abs_pattern = re.escape(origin_base) + r"/[^\s\)\]\"\'><]*"
-    content = re.sub(abs_pattern, replace_url, content)
+    rewritten_lines = []
+    for line in content.splitlines():
+        if line.startswith("Source: http://") or line.startswith("Source: https://"):
+            rewritten_lines.append(line)
+            continue
 
-    # Pass 2: root-relative paths in markdown links — ](/docs/page)
-    rel_pattern = r"\((/[^\s\)\"\'><]+)\)"
-    content = re.sub(rel_pattern, replace_path, content)
+        # Pass 1: full absolute URLs (https://domain.com/docs/page)
+        abs_pattern = re.escape(origin_base) + r"/[^\s\)\]\"\'><]*"
+        line = re.sub(abs_pattern, replace_url, line)
 
-    return content
+        # Pass 2: root-relative paths in markdown links — ](/docs/page)
+        rel_pattern = r"\((/[^\s\)\"\'><]+)\)"
+        line = re.sub(rel_pattern, replace_path, line)
+        rewritten_lines.append(line)
+
+    return "\n".join(rewritten_lines)
 
 
 def sort_urls(urls):
@@ -1201,6 +1674,23 @@ def sort_urls(urls):
         return (path.count("/"), path)
 
     return sorted(unique_in_order(urls), key=key)
+
+
+def read_url_file(path):
+    """Read URLs from a text or markdown file, ignoring blanks and comments."""
+    urls = []
+    for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        matches = re.findall(r"https?://[^\s\)\]\"'>]+", line)
+        if matches:
+            urls.extend(matches)
+            continue
+        candidate = line.split()[0]
+        if looks_like_url_candidate(candidate):
+            urls.append(ensure_url(candidate))
+    return urls
 
 
 def discover_html_urls(entry_url, origin, base_path, discover_limit):
@@ -1248,12 +1738,31 @@ def discover_html_urls(entry_url, origin, base_path, discover_limit):
     return discovered, pages_fetched, first_error
 
 
-def discover_urls(url, discover_limit):
+def discover_urls(
+    url,
+    discover_limit,
+    scope_url=None,
+    seed_urls=None,
+    url_file=None,
+    url_file_only=False,
+):
     """Discover crawl targets by merging sitemap and static HTML results."""
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    base_path = parsed.path.rstrip("/") or "/"
+    scope = ensure_url(scope_url) if scope_url else url
+    scope_parsed = urlparse(scope)
+    if scope_parsed.netloc != parsed.netloc:
+        raise ValueError("--scope-url must be on the same host as the crawl URL")
+    base_path = scope_parsed.path.rstrip("/") or "/"
     entry_url = canonicalize_page_url(url) or origin
+    file_urls = set(filter_by_base_path(seed_urls or [], base_path, origin))
+
+    if url_file_only:
+        return DiscoveryReport(
+            urls=deduplicate_localized(sort_urls(file_urls), base_path),
+            file_urls=file_urls,
+            url_file=url_file,
+        )
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         path_future = None
@@ -1275,7 +1784,7 @@ def discover_urls(url, discover_limit):
     path_urls = set(filter_by_base_path(path_raw, base_path, origin))
     origin_urls = set(filter_by_base_path(origin_raw, base_path, origin))
 
-    combined = path_urls | origin_urls | html_urls
+    combined = path_urls | origin_urls | html_urls | file_urls
     deduplicated = deduplicate_localized(sort_urls(combined), base_path)
 
     return DiscoveryReport(
@@ -1283,6 +1792,8 @@ def discover_urls(url, discover_limit):
         path_sitemap_urls=path_urls,
         origin_sitemap_urls=origin_urls,
         html_urls=html_urls,
+        file_urls=file_urls,
+        url_file=url_file,
         path_sitemaps_found=path_found,
         origin_sitemaps_found=origin_found,
         html_pages_fetched=html_pages_fetched,
@@ -1290,7 +1801,7 @@ def discover_urls(url, discover_limit):
     )
 
 
-def crawl_pages(urls, skill_dir, base_path, limit=None):
+def crawl_pages(urls, skill_dir, base_path, limit=None, write_fetch_errors=False):
     """Fetch all URLs, extract main content, write .md files. Returns list of successful filepaths."""
     if limit:
         urls = urls[:limit]
@@ -1324,7 +1835,27 @@ def crawl_pages(urls, skill_dir, base_path, limit=None):
             else:
                 print("empty (no content extracted)")
         except Exception as e:
-            print(f"fail ({e})")
+            if not write_fetch_errors:
+                print(f"fail ({e})")
+                continue
+            content = "\n".join(
+                [
+                    f"# {Path(filepath).stem.replace('-', ' ').replace('_', ' ').title()}",
+                    "",
+                    f"Source: {url}",
+                    "",
+                    "## Fetch Error",
+                    "",
+                    f"`{e}`",
+                    "",
+                    "The page was discovered, but the crawler could not fetch its "
+                    "content. Retry with headers/cookies from a browser session "
+                    "that can access the source page.",
+                ]
+            )
+            raw_contents[url] = (filepath, content)
+            pages.append(filepath)
+            print(f"error page ({e})")
 
     # Pass 2: rewrite links and write files
     origin = urlparse(urls[0])
@@ -1365,14 +1896,25 @@ def build_skill_md(skill_name, base_url, domain, pages):
     lines = [
         "---",
         f"name: {skill_name}",
-        f'description: "Documentation for {domain}. Use when the user asks about {skill_name}, references {domain}, or needs docs from {base_url}."',
+        f'description: "Documentation for {domain}. Use when the user asks about {skill_name}, references {domain}, or needs API docs, concepts, configuration, examples, migrations, troubleshooting, or guides from {base_url}."',
         "---",
         "",
         f"# {skill_name} Documentation",
         "",
         f"> {len(pages)} pages crawled from [{base_url}]({base_url})",
         "",
-        "## Pages",
+        "This `SKILL.md` is an index, not the full documentation. The actual docs are the linked markdown files in this skill folder.",
+        "",
+        "## Required Lookup",
+        "",
+        "When this skill triggers for a documentation question:",
+        "",
+        "1. Search this skill folder or choose the relevant entry from Contents.",
+        "2. Read at least one linked `.md` file before answering API, syntax, configuration, behavior, migration, or troubleshooting questions.",
+        "3. Read multiple files when the answer spans concepts, examples, reference pages, or framework integrations.",
+        "4. Treat the local markdown files as the source of truth. If the local docs do not cover the question, say that instead of filling gaps from memory.",
+        "",
+        "## Contents",
         "",
     ]
 
@@ -1393,11 +1935,11 @@ def build_skill_md(skill_name, base_url, domain, pages):
             lines.append(f"- [{title}]({filepath})")
         lines.append("")
 
-    lines.append("## Lookup")
+    lines.append("## Search Hints")
     lines.append("")
-    lines.append("1. Find the relevant section in Pages above")
-    lines.append("2. Read that file with the Read tool")
-    lines.append("3. If the answer spans sections, read multiple files")
+    lines.append("- Use the Contents section when the topic maps cleanly to a page.")
+    lines.append('- Use text search inside this skill folder when the topic could appear in many pages, for example `rg -n "<api-or-topic>" .`.')
+    lines.append("- Prefer files with exact API names, component names, config keys, or error messages.")
     lines.append("")
 
     return "\n".join(lines)
@@ -1415,6 +1957,51 @@ def parse_args(argv=None):
     )
     parser.add_argument("--name", help="Skill name (default: derived from domain)")
     parser.add_argument("--limit", type=int, help="Max pages to crawl")
+    parser.add_argument(
+        "--scope-url",
+        help=(
+            "URL whose path defines crawl scope. Use this when the seed URL is "
+            "a deep page but the docs sidebar covers a broader section."
+        ),
+    )
+    parser.add_argument(
+        "--url-file",
+        help=(
+            "Newline-delimited list of additional URLs to crawl. Useful when "
+            "a site blocks discovery but you can export the docs URL tree."
+        ),
+    )
+    parser.add_argument(
+        "--url-file-only",
+        action="store_true",
+        help=(
+            "Crawl only URLs from --url-file, skipping sitemap and HTML "
+            "discovery. Useful for curated docs exports."
+        ),
+    )
+    parser.add_argument(
+        "--header",
+        action="append",
+        default=[],
+        help="Extra request header, in 'Name: value' form. Can be repeated.",
+    )
+    parser.add_argument(
+        "--cookie",
+        help="Cookie header value to send with page and sitemap requests.",
+    )
+    parser.add_argument(
+        "--write-fetch-errors",
+        action="store_true",
+        help="Write transparent error pages for URLs that are discovered but fail to fetch.",
+    )
+    parser.add_argument(
+        "--browser-cdp",
+        help=(
+            "Use an existing Chrome DevTools browser to fetch rendered page "
+            "HTML, for example 9222 or http://127.0.0.1:9222. Useful for "
+            "JavaScript-rendered or browser-verified docs sites."
+        ),
+    )
     parser.add_argument(
         "--discover-limit",
         type=int,
@@ -1453,6 +2040,18 @@ def parse_args(argv=None):
         parser.error("--limit must be greater than 0")
     if args.discover_limit < 1:
         parser.error("--discover-limit must be greater than 0")
+    if args.url_file_only and not args.url_file:
+        parser.error("--url-file-only requires --url-file")
+    if args.scope_url:
+        args.scope_url = ensure_url(args.scope_url)
+        scope_parsed = urlparse(args.scope_url)
+        if not scope_parsed.scheme or not scope_parsed.netloc:
+            parser.error(f"invalid --scope-url: {args.scope_url}")
+        if scope_parsed.netloc != parsed.netloc:
+            parser.error("--scope-url must be on the same host as URL")
+    for header in args.header:
+        if ":" not in header:
+            parser.error("--header values must use 'Name: value' format")
     return args
 
 
@@ -1484,10 +2083,14 @@ def print_discovery_summary(report, base_path):
     if report.html_error and report.html_pages_fetched == 0:
         print(f"HTML error:     {report.html_error}")
 
+    if report.url_file:
+        print(f"URL file:       {len(report.file_urls)} in-scope URLs")
+
     sources = [
         ("path sitemap", len(report.path_sitemap_urls)),
         ("origin sitemap", len(report.origin_sitemap_urls)),
         ("HTML discovery", len(report.html_urls)),
+        ("URL file", len(report.file_urls)),
     ]
     best_name, best_count = max(sources, key=lambda item: item[1])
     if best_count:
@@ -1498,22 +2101,48 @@ def print_discovery_summary(report, base_path):
 def main():
     args = parse_args()
 
+    global BROWSER_CDP, BROWSER_NAV_SEED
+    BROWSER_CDP = normalize_browser_cdp(args.browser_cdp)
+    BROWSER_NAV_SEED = args.url
+
+    for header in args.header:
+        name, value = header.split(":", 1)
+        EXTRA_REQUEST_HEADERS[name.strip()] = value.strip()
+    if args.cookie:
+        EXTRA_REQUEST_HEADERS["Cookie"] = args.cookie
+
     parsed = urlparse(args.url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    base_path = parsed.path.rstrip("/") or "/"
+    scope_url = args.scope_url or args.url
+    scope_parsed = urlparse(scope_url)
+    base_path = scope_parsed.path.rstrip("/") or "/"
     domain = parsed.netloc
     base_url = origin if base_path == "/" else origin + base_path
+    seed_urls = read_url_file(args.url_file) if args.url_file else []
 
     skill_name = slugify_skill_name(args.name) if args.name else derive_skill_name(args.url)
     skill_dir = Path.cwd() / ".agents" / "skills" / skill_name
 
     print(f"Origin:    {origin}")
+    if args.scope_url:
+        print(f"Entry path:{parsed.path.rstrip('/') or '/'}")
     print(f"Base path: {base_path}")
     print(f"Skill:     {skill_name}")
     print(f"Output:    {skill_dir}")
 
     print("\nDiscovering pages...")
-    report = discover_urls(args.url, args.discover_limit)
+    try:
+        report = discover_urls(
+            args.url,
+            args.discover_limit,
+            scope_url=args.scope_url,
+            seed_urls=seed_urls,
+            url_file=args.url_file,
+            url_file_only=args.url_file_only,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
     print_discovery_summary(report, base_path)
 
     if not report.urls:
@@ -1537,7 +2166,12 @@ def main():
         return
 
     skill_dir.mkdir(parents=True, exist_ok=True)
-    pages = crawl_pages(urls_to_use, skill_dir, base_path)
+    pages = crawl_pages(
+        urls_to_use,
+        skill_dir,
+        base_path,
+        write_fetch_errors=args.write_fetch_errors,
+    )
 
     if not pages:
         print("ERROR: No pages were successfully crawled.")

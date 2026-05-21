@@ -2,7 +2,7 @@
 
 Goal: critically review the pertinence of unresolved PR comments and classify each comment item as `ACCEPT`, `REJECT`, or `DISCUSS`.
 
-You arrive here with entrypoint packets from Phase 1. Each packet contains all unresolved comments for one entrypoint. Give one packet to one reviewer, or classify locally if subagents were not authorized.
+You arrive here with entrypoint packets from Phase 1. Each packet contains all unresolved comments for one entrypoint. Give one packet to one reviewer. Classify locally only when using the local fallback.
 
 ## Classification rules
 
@@ -16,7 +16,7 @@ Be critical. Do not accept comments just because a reviewer wrote them. Use the 
 
 ## Step 1 - Classify each entrypoint packet
 
-If subagents are authorized, spawn one `explorer` reviewer per packet before waiting. Reviewers must not edit files.
+Spawn one `explorer` reviewer per packet before waiting. Reviewers must not edit files.
 
 Reviewer prompt template:
 
@@ -33,7 +33,7 @@ For each comment or group of materially duplicate comments:
 2. Check the current file contents if needed.
 3. Use callers, dependencies, tests, and local patterns from the packet to verify the premise.
 4. Decide whether the comment should be ACCEPT, REJECT, or DISCUSS.
-5. Give a concise reflection with evidence and a concrete recommendation.
+5. Give a concrete current-behavior example, a concise reflection with evidence, and a concrete recommendation.
 
 Group comments only when they are the same concern in the same entrypoint. Preserve all original comment indexes in `CommentIds`.
 
@@ -49,22 +49,24 @@ CommentReview:
   Line: <line number or range>
   Classification: <ACCEPT | REJECT | DISCUSS>
   CommentSummary: <what the reviewer asked for, in 1-2 sentences>
+  Actual behavior example: <concrete current behavior or code path that proves the comment valid, invalid, or unclear>
   Reflection: <why this classification is correct, with concrete evidence>
   Recommendation: <what to do next; include code-level guidance for ACCEPT, reply guidance for REJECT/DISCUSS>
 
 Rules:
 - One block per comment or grouped duplicate concern.
 - Preserve all comment indexes, thread IDs, and primary database IDs exactly.
+- Make `Actual behavior example` specific. Prefer "When <input/state/user action> reaches <code path>, the current code <observable result>" over abstract claims. For `REJECT`, use it to show the current behavior that disproves the comment premise. For `DISCUSS`, name the concrete scenario that needs clarification.
 - If a comment is wrong, say so clearly and explain the false premise.
 - If a comment is unclear, classify as DISCUSS and state the exact clarification needed.
 - Do not include praise or unrelated summaries.
 ```
 
-If subagents are not authorized, apply the same template yourself to each packet.
+If using the local fallback, apply the same template yourself to each packet.
 
 ## Step 2 - Aggregate and order results
 
-Once every reviewer has returned, aggregate findings. If subagents are authorized, this can be one `default` agent. Otherwise, do it locally.
+Once every reviewer has returned, aggregate findings with one `default` agent. If using the local fallback, do it locally.
 
 Aggregator prompt:
 
@@ -74,7 +76,7 @@ You are given N comment pertinence reports. Each contains zero or more CommentRe
 Do this in order:
 1. Parse every CommentReview block.
 2. Merge blocks that contain overlapping CommentIds or the same root concern on the same file and nearby lines.
-3. When merging, preserve every CommentId, ThreadId, and PrimaryDatabaseId, keep the strongest evidence, and keep one final classification.
+3. When merging, preserve every CommentId, ThreadId, and PrimaryDatabaseId, keep the clearest actual behavior example and strongest evidence, and keep one final classification.
 4. If merged reviewers disagree on classification, choose DISCUSS unless the evidence clearly supports ACCEPT or REJECT.
 5. Order output by the lowest CommentId in each item.
 
@@ -90,6 +92,7 @@ Return this exact JSON and nothing else:
       "line": "42",
       "classification": "ACCEPT",
       "comment_summary": "...",
+      "actual_behavior_example": "...",
       "reflection": "...",
       "recommendation": "...",
       "entrypoint": "Auth login flow"

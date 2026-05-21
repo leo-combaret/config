@@ -2,11 +2,11 @@
 
 Goal: produce a deduplicated, ordered list of review issues grouped by file.
 
-You arrive here with the packets from Phase 1. Each packet is self-contained. Give one packet to one reviewer, or review each packet locally if subagents were not authorized.
+You arrive here with the packets from Phase 1. Each packet is self-contained. Give one packet to one reviewer. Review packets locally only when using the local fallback.
 
 ## Step 1 - Review each packet
 
-If subagents are authorized, spawn one reviewer per packet before waiting. Use `agent_type: "explorer"` unless the reviewer needs to run project commands; then use `default`. Reviewers must not edit files.
+Spawn one reviewer per packet before waiting. Use `agent_type: "explorer"` unless the reviewer needs to run project commands; then use `default`. Reviewers must not edit files.
 
 Reviewer prompt template:
 
@@ -39,6 +39,7 @@ Issue:
   Category: <Correctness | Security | Performance | Maintainability>
   Priority: <MUST | SHOULD | COULD>
   Description: <what is wrong, in 1-3 sentences>
+  Actual behavior example: <concrete example of the current behavior, including the trigger/input/state and the observable bad result>
   Suggestion: <how to fix, with a code snippet if useful>
 
 Rules:
@@ -48,16 +49,17 @@ Rules:
 - `SHOULD` is for real maintainability, test, or edge-case risks worth fixing before merge.
 - `COULD` is for low-risk cleanup. Do not emit style-only nits unless they hide a real issue.
 - Cite real line numbers from the diff or surrounding file.
+- Make `Actual behavior example` concrete and grounded in the code. Prefer "When <specific input/state> happens, <current code path> produces <bad observable result>" over abstract risk wording like "this could break."
 - One issue per block.
 - If you find nothing, emit exactly: `No issues found in this slice.`
 - Do not include praise, summaries, or unrelated commentary.
 ```
 
-If subagents are not authorized, apply the same template yourself to each packet.
+If using the local fallback, apply the same template yourself to each packet.
 
 ## Step 2 - Dedupe, group, and number
 
-Once every reviewer has returned, aggregate findings. If subagents are authorized, this can be one `default` agent. Otherwise, do it locally.
+Once every reviewer has returned, aggregate findings with one `default` agent. If using the local fallback, do it locally.
 
 Aggregator prompt:
 
@@ -71,12 +73,13 @@ Issue:
   Category: <...>
   Priority: <MUST|SHOULD|COULD>
   Description: <...>
+  Actual behavior example: <...>
   Suggestion: <...>
 
 Do this in order:
 1. Parse every Issue block.
 2. Dedupe issues that target the same file, overlapping lines within roughly 3 lines, and the same root cause.
-3. When merging duplicates, keep the highest priority and clearest description/suggestion. Mention if multiple reviewers flagged it.
+3. When merging duplicates, keep the highest priority, clearest description, clearest actual behavior example, and clearest suggestion. Mention if multiple reviewers flagged it.
 4. Group by file path.
 5. Order within each file by priority (MUST > SHOULD > COULD), then line ascending.
 6. Order files by total issue count descending, then path ascending.
@@ -98,6 +101,7 @@ Return this exact JSON and nothing else:
           "category": "Security",
           "priority": "MUST",
           "description": "...",
+          "actual_behavior_example": "...",
           "suggestion": "..."
         }
       ]

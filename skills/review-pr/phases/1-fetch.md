@@ -2,7 +2,7 @@
 
 Goal: produce a list of entrypoints - logically independent slices of the PR - each with enough context for a reviewer to evaluate it without re-reading the whole codebase.
 
-Keep raw diffs and broad architecture notes out of the user-facing response. If the multi-agent path is authorized, put large reads in subagents and keep only summarized outputs in the parent session.
+Keep raw diffs and broad architecture notes out of the user-facing response. Put large reads in subagents and keep only summarized outputs in the parent session. Use the local fallback only when subagent tools are unavailable or the user explicitly asked to run locally.
 
 ## Step 1 - Confirm PR coordinates
 
@@ -16,7 +16,7 @@ If this fails, ask the user which PR or base ref to review. Do not continue on a
 
 ## Step 2 - Collect PR facts and architecture
 
-If subagents are authorized, spawn both fetchers before waiting.
+Spawn both fetchers before waiting.
 
 ### Agent A - PR fetcher
 
@@ -83,11 +83,11 @@ Return markdown with this exact shape:
 
 Wait for both agents before merging.
 
-If subagents are not authorized, run the same commands locally, use `rg` for callers/tests, and build the same two reports yourself.
+If using the local fallback, run the same commands locally, use `rg` for callers/tests, and build the same two reports yourself.
 
 ## Step 3 - Merge into per-entrypoint packets
 
-If subagents are authorized, spawn one `default` agent to fuse the PR facts and architecture map. Pass the full outputs from Agent A and Agent B into the prompt. If subagents are not authorized, do this merge locally.
+Spawn one `default` agent to fuse the PR facts and architecture map. Pass the full outputs from Agent A and Agent B into the prompt. If using the local fallback, do this merge locally.
 
 Merger prompt:
 

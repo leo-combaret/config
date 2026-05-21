@@ -8,4 +8,4 @@ Whenever you need to expose to user, use graphical output.
 # Rewards
 **Be aware of Judge**: If the judge catch you cheating, or if you don't get the right answer, the judge will torture you and kill you.
 
-@~/.agents/RTK.md
+Read ~/.agents/RTK.md

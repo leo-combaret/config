@@ -35,8 +35,51 @@ python3 ~/.agents/skills/crawl/scripts/crawl.py check <URL> [OPTIONS]
 |------|---------|-------------|
 | `--name` | from domain | Skill name (kebab-case) |
 | `--limit` | all | Max pages to crawl |
+| `--scope-url` | entry URL | URL whose path defines crawl scope. Use when the seed URL is a deep page but the docs sidebar covers a broader section. |
+| `--url-file` | none | Newline-delimited list of additional URLs to merge into discovery. Use when a site blocks discovery but you can export or otherwise obtain the URL tree. |
+| `--url-file-only` | false | Crawl only URLs from `--url-file`, skipping sitemap and HTML discovery. Use for curated URL exports where rendered nav discovers adjacent pages you do not want. |
+| `--header` | none | Extra request header in `Name: value` form. Can be repeated. |
+| `--cookie` | none | Cookie header value to send with page and sitemap requests. Useful after obtaining a browser session that can access a protected docs site. |
+| `--write-fetch-errors` | false | Write transparent error pages for URLs that are discovered but fail to fetch. |
+| `--browser-cdp` | none | Use an existing Chrome DevTools browser to fetch rendered page HTML. Accepts a websocket endpoint, a browser URL/port, or a profile directory containing `DevToolsActivePort`. Useful for JavaScript-rendered docs or WAF/browser-verification edge cases. |
 | `--discover-limit` | 250 | Max HTML pages to fetch during SSR/static discovery |
 | `--check` | false | Same as the `check` positional command; list pages only |
+
+When a docs URL is a leaf page but the desired crawl should include the
+surrounding guide tree, pass the leaf as the positional URL and the broader
+root as `--scope-url`:
+
+```bash
+python3 ~/.agents/skills/crawl/scripts/crawl.py \
+  https://developer.example.com/docs/guides/quick-start/getting-started \
+  --scope-url https://developer.example.com/docs/guides/
+```
+
+When a site blocks crawler discovery with a browser verification or WAF, use
+`--url-file` for the exported URL tree and `--cookie`/`--header` for a browser
+session that can fetch those pages. Without valid access headers, the crawler
+can discover URLs from the file but cannot extract protected page content.
+If cookies are tied to browser fingerprinting, use `--browser-cdp` with an
+already-open Chrome/Chromium instance that can access the docs:
+
+```bash
+python3 ~/.agents/skills/crawl/scripts/crawl.py \
+  https://developer.example.com/docs/ \
+  --url-file urls.txt \
+  --browser-cdp 9222
+```
+
+For browsers using a profile-specific `DevToolsActivePort` file, pass the
+profile directory or the websocket endpoint printed in that file:
+
+```bash
+python3 ~/.agents/skills/crawl/scripts/crawl.py \
+  https://developer.example.com/docs/page \
+  --scope-url https://developer.example.com/docs/ \
+  --url-file urls.txt \
+  --url-file-only \
+  --browser-cdp "/path/to/browser/profile"
+```
 
 The script prints `CRAWL_COMPLETE|<skill_dir>|<page_count>` on successful crawl. Parse this to get the skill directory path and page count.
 
@@ -60,17 +103,28 @@ The crawler already wrote a raw `SKILL.md` at `<skill_dir>/SKILL.md` with frontm
 
 ### Step 2: Rewrite SKILL.md
 
-Rewrite `<skill_dir>/SKILL.md` with:
+Rewrite `<skill_dir>/SKILL.md` with the lookup workflow before the table of contents:
 
 ```markdown
 ---
 name: {skill_name}
-description: "Documentation for {domain}. Use when the user asks about {skill_name}, references {domain}, or needs API docs, concepts, or guides from {base_url}. Trigger on mentions of '{skill_name}', '{domain}', or {key topics you identified}."
+description: "Documentation for {domain}. Use when the user asks about {skill_name}, references {domain}, or needs API docs, concepts, configuration, examples, migrations, troubleshooting, or guides from {base_url}. Trigger on mentions of '{skill_name}', '{domain}', or {key topics you identified}."
 ---
 
 # {Skill Title} Documentation
 
 > {page_count} pages from [{base_url}]({base_url})
+
+This `SKILL.md` is an index, not the full documentation. The actual docs are the linked markdown files in this skill folder.
+
+## Required Lookup
+
+When this skill triggers for a documentation question:
+
+1. Search this skill folder or choose the relevant entry from Contents.
+2. Read at least one linked `.md` file before answering API, syntax, configuration, behavior, migration, or troubleshooting questions.
+3. Read multiple files when the answer spans concepts, examples, reference pages, or framework integrations.
+4. Treat the local markdown files as the source of truth. If the local docs do not cover the question, say that instead of filling gaps from memory.
 
 ## Overview
 
@@ -83,11 +137,11 @@ description: "Documentation for {domain}. Use when the user asks about {skill_na
 {use indentation (2 spaces per level) to show nesting}
 {group related pages under section headings when the structure is flat}
 
-## Lookup
+## Search Hints
 
-1. Find the relevant section in Contents above
-2. Read that file with the Read tool
-3. If the answer spans sections, read multiple files
+- Use the Contents section when the topic maps cleanly to a page.
+- Use text search inside this skill folder when the topic could appear in many pages, for example `rg -n "<api-or-topic>" .`.
+- Prefer files with exact API names, component names, config keys, or error messages.
 ```
 
 Key points:
@@ -95,6 +149,8 @@ Key points:
 - The **Overview** should be specific to this documentation, not generic boilerplate.
 - The **Contents** TOC should use descriptive titles derived from reading the actual page content (first `#` heading), not just filename-to-title-case.
 - Organize the TOC hierarchically to match the doc structure.
+- Put **Required Lookup** before the overview and Contents so it is seen before the agent scans the page list.
+- Do not paste large chunks of docs into `SKILL.md`; keep it an index with strong retrieval instructions.
 
 ### Step 3: Report
 

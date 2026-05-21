@@ -1,6 +1,6 @@
 ---
 name: fix-comments
-description: Analyze and resolve unresolved GitHub PR review comments with PR-review discipline. Use when the user asks to fix PR comments, handle review feedback, address unresolved comments, or resolve GitHub review threads. If the user explicitly asks for subagents, parallel agents, or the deep workflow, coordinate Codex subagents for fetching comments, mapping architecture, classifying comment pertinence, fixing accepted feedback, and resolving review threads; otherwise perform the workflow locally or ask before spawning agents.
+description: Analyze and resolve unresolved GitHub PR review comments with PR-review discipline. Use when the user asks to fix PR comments, handle review feedback, address unresolved comments, or resolve GitHub review threads. This skill uses Codex subagents by default for fetching, architecture mapping, classification, and bounded fixes when subagent tools are available.
 ---
 
 # Fix Comments
@@ -9,7 +9,11 @@ A Codex-compatible workflow for handling unresolved GitHub PR review comments.
 
 This skill is not a blind "apply reviewer feedback" workflow. Review comments can be wrong, stale, unclear, or outside the PR scope. The review phase must classify each comment as `ACCEPT`, `REJECT`, or `DISCUSS` with evidence and a recommendation.
 
-Codex subagents are opt-in. Spawn subagents only when the user's current request explicitly asks for agents, subagents, parallel review, or this deep workflow. If the user only asks to fix comments, use the same process locally, or ask whether they want the multi-agent version before spawning.
+## Execution model
+
+Use the subagent workflow described in the phase files by default. Invoking this skill means the user wants the comment workflow, including its fetcher, architecture mapper, classifier, merger, and worker agents where those agents are called for.
+
+Fall back to the local, non-subagent path only when subagent tools are unavailable or when the user explicitly asks to run the workflow locally. Do not ask for a second authorization step before spawning the agents described by this skill.
 
 ## Prerequisites
 
@@ -24,7 +28,7 @@ Respect the current working tree. Do not revert user changes, do not commit, and
 
 ## Codex subagent rules
 
-When the multi-agent path is explicitly authorized:
+When using subagents:
 
 - Use Codex `spawn_agent` and `wait_agent`, not legacy Agent specs.
 - Prefer built-in agents: `default` for fetching, merging, aggregation, and GitHub API actions; `explorer` for read-heavy architecture mapping and comment pertinence review; `worker` for bounded fixes.
@@ -34,7 +38,7 @@ When the multi-agent path is explicitly authorized:
 - For code-editing workers, assign disjoint ownership by entrypoint. Tell workers they are not alone in the codebase, must not revert unrelated edits, and must list every changed file.
 - Close completed agent threads when they are no longer needed if the tool is available.
 
-When the multi-agent path is not authorized, follow the same four phases locally without spawning subagents.
+When using the local fallback, follow the same four phases locally without spawning subagents.
 
 ## Workflow shape
 
