@@ -28,7 +28,9 @@ Requirements:
 """
 
 import argparse
+import atexit
 import base64
+import glob
 import hashlib
 import html as html_lib
 import io
@@ -36,10 +38,13 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import ssl
 import struct
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -295,9 +300,14 @@ BLOCKED_PAGE_EXTENSIONS = frozenset(
 _converter = None
 EXTRA_REQUEST_HEADERS = {}
 BROWSER_CDP = None
+BROWSER_AUTO_FALLBACK = True
+BROWSER_AUTOLAUNCH_ATTEMPTED = False
+BROWSER_EXECUTABLE = None
 BROWSER_CLIENT = None
 BROWSER_FETCH_TIMEOUT = 45
 BROWSER_NAV_SEED = None
+BROWSER_MANAGED_PROCESS = None
+BROWSER_MANAGED_PROFILE_DIR = None
 
 
 def request_headers(defaults):
@@ -305,6 +315,195 @@ def request_headers(defaults):
     headers = dict(defaults)
     headers.update(EXTRA_REQUEST_HEADERS)
     return headers
+
+
+def executable_file(path):
+    """Return True when path points at an executable file."""
+    candidate = Path(path).expanduser()
+    return candidate.is_file() and os.access(candidate, os.X_OK)
+
+
+def first_executable(paths):
+    """Return the first executable path from a list of candidates."""
+    for path in paths:
+        if path and executable_file(path):
+            return str(Path(path).expanduser())
+    return None
+
+
+def playwright_chromium_candidates():
+    """Return Chromium executables installed by Playwright, newest first."""
+    roots = [
+        Path.home() / "Library" / "Caches" / "ms-playwright",
+        Path.home() / ".cache" / "ms-playwright",
+        Path.home() / "AppData" / "Local" / "ms-playwright",
+    ]
+    patterns = [
+        "chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "chromium-*/chrome-linux*/chrome",
+        "chromium-*/chrome-win*/chrome.exe",
+    ]
+    candidates = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for pattern in patterns:
+            candidates.extend(glob.glob(str(root / pattern)))
+    return sorted(candidates, reverse=True)
+
+
+def find_chromium_executable(explicit_path=None):
+    """Find a real Chrome/Chromium executable suitable for CDP."""
+    if explicit_path:
+        expanded = Path(explicit_path).expanduser()
+        if executable_file(expanded):
+            return str(expanded)
+        raise RuntimeError(f"browser executable is not executable: {explicit_path}")
+
+    env_candidate = first_executable(
+        os.environ.get(name)
+        for name in [
+            "CRAWL_BROWSER_EXECUTABLE",
+            "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH",
+            "CHROME_PATH",
+            "CHROMIUM_PATH",
+            "BROWSER_PATH",
+        ]
+    )
+    if env_candidate:
+        return env_candidate
+
+    which_candidate = first_executable(
+        shutil.which(name)
+        for name in [
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "brave-browser",
+            "chrome",
+        ]
+    )
+    if which_candidate:
+        return which_candidate
+
+    mac_candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        str(Path.home() / "Applications" / "Google Chrome.app" / "Contents" / "MacOS" / "Google Chrome"),
+        str(Path.home() / "Applications" / "Chromium.app" / "Contents" / "MacOS" / "Chromium"),
+    ]
+    mac_candidate = first_executable(mac_candidates)
+    if mac_candidate:
+        return mac_candidate
+
+    playwright_candidate = first_executable(playwright_chromium_candidates())
+    if playwright_candidate:
+        return playwright_candidate
+
+    return None
+
+
+def reserve_local_port():
+    """Reserve and release an available localhost port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def cleanup_managed_browser():
+    """Terminate a Chromium process launched by this crawler."""
+    global BROWSER_MANAGED_PROCESS
+    if BROWSER_MANAGED_PROCESS and BROWSER_MANAGED_PROCESS.poll() is None:
+        BROWSER_MANAGED_PROCESS.terminate()
+        try:
+            BROWSER_MANAGED_PROCESS.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            BROWSER_MANAGED_PROCESS.kill()
+    BROWSER_MANAGED_PROCESS = None
+
+    if BROWSER_MANAGED_PROFILE_DIR:
+        shutil.rmtree(BROWSER_MANAGED_PROFILE_DIR, ignore_errors=True)
+
+
+atexit.register(cleanup_managed_browser)
+
+
+def launch_managed_chromium(reason, required=False):
+    """Launch headless Chromium with CDP and return its websocket endpoint."""
+    global BROWSER_AUTOLAUNCH_ATTEMPTED, BROWSER_MANAGED_PROCESS, BROWSER_MANAGED_PROFILE_DIR
+
+    if BROWSER_AUTOLAUNCH_ATTEMPTED and not required:
+        return None
+    BROWSER_AUTOLAUNCH_ATTEMPTED = True
+
+    executable = find_chromium_executable(BROWSER_EXECUTABLE)
+    if not executable:
+        message = (
+            "could not find Chrome/Chromium for automatic CDP fallback. "
+            "Install Chromium/Chrome, install Playwright browsers, set "
+            "CRAWL_BROWSER_EXECUTABLE, or pass --browser-cdp."
+        )
+        if required:
+            raise RuntimeError(message)
+        print(f"Browser fallback unavailable: {message}", file=sys.stderr)
+        return None
+
+    port = reserve_local_port()
+    profile_dir = tempfile.mkdtemp(prefix="crawl-chromium-")
+    cmd = [
+        executable,
+        f"--remote-debugging-address=127.0.0.1",
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile_dir}",
+        "--headless=new",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "about:blank",
+    ]
+
+    print(f"Browser fallback: launching Chromium via CDP ({reason}).")
+    BROWSER_MANAGED_PROFILE_DIR = profile_dir
+    BROWSER_MANAGED_PROCESS = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        if BROWSER_MANAGED_PROCESS.poll() is not None:
+            raise RuntimeError("managed Chromium exited before CDP became available")
+
+        endpoint = fetch_browser_websocket_url("127.0.0.1", port)
+        if endpoint:
+            return endpoint
+
+        endpoint = read_devtools_active_port(profile_dir, host="127.0.0.1")
+        if endpoint:
+            return endpoint
+
+        time.sleep(0.2)
+
+    raise RuntimeError("timed out waiting for managed Chromium CDP endpoint")
+
+
+def ensure_browser_cdp(reason, required=False):
+    """Ensure BROWSER_CDP is set, launching Chromium if automatic fallback is enabled."""
+    global BROWSER_CDP
+    if BROWSER_CDP:
+        return BROWSER_CDP
+    if not BROWSER_AUTO_FALLBACK and not required:
+        return None
+    endpoint = launch_managed_chromium(reason, required=required)
+    if endpoint:
+        BROWSER_CDP = endpoint
+    return BROWSER_CDP
 
 
 def normalize_browser_cdp(value):
@@ -522,7 +721,7 @@ def fetch_sitemap_tree(sitemap_url, seen=None, depth=0):
 
     try:
         xml_text = fetch_sitemap_content(sitemap_url)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
         return []
 
     entries = parse_sitemap(xml_text)
@@ -1437,6 +1636,13 @@ def fetch_page_with_browser(url):
     return get_browser_client().fetch_page(url)
 
 
+def should_retry_with_browser(error):
+    """Return True when a direct HTML request should be retried in Chromium."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {400, 401, 403, 406, 407, 408, 409, 418, 421, 429, 431, 451, 500, 502, 503, 504}
+    return isinstance(error, (urllib.error.URLError, TimeoutError, OSError))
+
+
 def fetch_page_with_final_url(url):
     """Fetch an HTML page and return (content, final URL after redirects)."""
     if BROWSER_CDP:
@@ -1454,8 +1660,16 @@ def fetch_page_with_final_url(url):
             }
         ),
     )
-    with open_url(req, timeout=30) as resp:
-        return resp.read().decode("utf-8", errors="replace"), resp.geturl()
+    try:
+        with open_url(req, timeout=30) as resp:
+            return resp.read().decode("utf-8", errors="replace"), resp.geturl()
+    except Exception as e:
+        if not should_retry_with_browser(e):
+            raise
+        endpoint = ensure_browser_cdp(f"direct HTML fetch failed: {e}")
+        if not endpoint:
+            raise
+        return fetch_page_with_browser(url)
 
 
 def extract_main_content(html):
@@ -1764,6 +1978,14 @@ def discover_urls(
             url_file=url_file,
         )
 
+    def sitemap_future_result(future):
+        if not future:
+            return [], []
+        try:
+            return future.result()
+        except Exception:
+            return [], []
+
     with ThreadPoolExecutor(max_workers=3) as executor:
         path_future = None
         if base_path != "/":
@@ -1777,9 +1999,12 @@ def discover_urls(
             discover_html_urls, entry_url, origin, base_path, discover_limit
         )
 
-        path_raw, path_found = path_future.result() if path_future else ([], [])
-        origin_raw, origin_found = origin_future.result()
-        html_urls, html_pages_fetched, html_error = html_future.result()
+        path_raw, path_found = sitemap_future_result(path_future)
+        origin_raw, origin_found = sitemap_future_result(origin_future)
+        try:
+            html_urls, html_pages_fetched, html_error = html_future.result()
+        except Exception as e:
+            html_urls, html_pages_fetched, html_error = set(), 0, str(e)
 
     path_urls = set(filter_by_base_path(path_raw, base_path, origin))
     origin_urls = set(filter_by_base_path(origin_raw, base_path, origin))
@@ -1997,9 +2222,25 @@ def parse_args(argv=None):
     parser.add_argument(
         "--browser-cdp",
         help=(
-            "Use an existing Chrome DevTools browser to fetch rendered page "
-            "HTML, for example 9222 or http://127.0.0.1:9222. Useful for "
-            "JavaScript-rendered or browser-verified docs sites."
+            "Use Chrome DevTools Protocol to fetch rendered page HTML. Pass "
+            "'auto' to launch a temporary Chromium, or pass an existing "
+            "endpoint/profile/port such as 9222 or http://127.0.0.1:9222."
+        ),
+    )
+    parser.add_argument(
+        "--browser-executable",
+        help=(
+            "Chrome/Chromium executable to use when launching automatic CDP "
+            "fallback. Defaults to CRAWL_BROWSER_EXECUTABLE, system Chrome, "
+            "or a Playwright-installed Chromium."
+        ),
+    )
+    parser.add_argument(
+        "--no-browser-fallback",
+        action="store_true",
+        help=(
+            "Disable automatic Chromium/CDP retry when direct HTML requests "
+            "fail with browser-verification or HTTP errors such as 431."
         ),
     )
     parser.add_argument(
@@ -2101,8 +2342,17 @@ def print_discovery_summary(report, base_path):
 def main():
     args = parse_args()
 
-    global BROWSER_CDP, BROWSER_NAV_SEED
-    BROWSER_CDP = normalize_browser_cdp(args.browser_cdp)
+    global BROWSER_AUTO_FALLBACK, BROWSER_CDP, BROWSER_EXECUTABLE, BROWSER_NAV_SEED
+    BROWSER_AUTO_FALLBACK = not args.no_browser_fallback
+    BROWSER_EXECUTABLE = args.browser_executable
+    if args.browser_cdp and args.browser_cdp.lower() == "auto":
+        try:
+            BROWSER_CDP = ensure_browser_cdp("--browser-cdp auto", required=True)
+        except RuntimeError as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
+    else:
+        BROWSER_CDP = normalize_browser_cdp(args.browser_cdp)
     BROWSER_NAV_SEED = args.url
 
     for header in args.header:

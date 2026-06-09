@@ -14,3 +14,5 @@
 [user]
 	email = leo.combaret@mistral.ai
 	name = leo-combaret
+[includeIf "gitdir:~/Documents/"]
+  path = ~/.gitconfig-sandevistan
