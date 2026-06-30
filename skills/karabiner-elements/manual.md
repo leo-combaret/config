@@ -1,4 +1,0 @@
-# Manual
-- Configuration Change a key to another key Use more complex modifications Add your own complex modifications Edit complex modifications Add your own complex modifications (using JavaScript) Choose devices Disable the built-in keyboard when external keyboard is connected Set keyboard type Configure icon in menu bar
-- Operation Quit Restart Uninstall Check for updates Confirm the result of configuration (EventViewer) Manage profiles Show log messages Export and import configuration About Unsafe Configuration Downgrade
-- Misc Required macOS settings About "Device is ignored temporarily" alert Implicit behavior Input event modification chaining MultitouchExtension Command line interface The location of the configuration file Change app icon

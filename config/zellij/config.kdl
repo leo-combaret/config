@@ -149,14 +149,10 @@ keybinds clear-defaults=true {
         }
     }
     shared_except "locked" {
-        bind "Super 1" { MoveFocus "left"; MoveFocus "up"; SwitchToMode "normal"; }
-        bind "Super 2" { MoveFocus "left"; MoveFocus "down"; SwitchToMode "normal"; }
-        bind "Super 3" { MoveFocus "right"; MoveFocus "up"; SwitchToMode "normal"; }
-        bind "Super 4" { MoveFocus "right"; MoveFocus "down"; SwitchToMode "normal"; }
-        bind "Alt 1" { MoveFocus "left"; MoveFocus "up"; SwitchToMode "normal"; }
-        bind "Alt 2" { MoveFocus "left"; MoveFocus "down"; SwitchToMode "normal"; }
-        bind "Alt 3" { MoveFocus "right"; MoveFocus "up"; SwitchToMode "normal"; }
-        bind "Alt 4" { MoveFocus "right"; MoveFocus "down"; SwitchToMode "normal"; }
+        bind "Super 1" { MoveFocus "left"; SwitchToMode "normal"; }
+        bind "Super 2" { MoveFocus "right"; SwitchToMode "normal"; }
+        bind "Alt 1" { MoveFocus "left"; SwitchToMode "normal"; }
+        bind "Alt 2" { MoveFocus "right"; SwitchToMode "normal"; }
         bind "Alt ;" { ToggleFloatingPanes; SwitchToMode "normal"; }
         bind "Alt :" {
             Run "/bin/zsh" {

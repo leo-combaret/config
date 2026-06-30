@@ -6,11 +6,11 @@ argument-hint: ["url", "check https://docs.example.com/"]
 
 # Crawl — Website-to-Skill Generator
 
-Two-phase workflow: a Python script crawls pages and generates a raw SKILL.md (Phase 1), then you read the docs and rewrite it into a proper skill (Phase 2).
+Two-phase workflow: a Python script crawls pages and writes markdown docs (Phase 1), then it invokes Codex CLI with `skill-creator` to author the final `SKILL.md` from the generated docs (Phase 2).
 
 ## Phase 1: Crawl
 
-Run the crawler from the directory where the user wants the generated skill to live. It discovers URLs, fetches each page, strips site chrome, converts to markdown, writes `.md` files, and generates a raw `SKILL.md` with all page references under the caller's local `.agents/skills/<skill-name>/` directory.
+Run the crawler from the directory where the user wants the generated skill to live. It discovers URLs, fetches each page, strips site chrome, converts to markdown, writes `.md` files, then calls `codex exec` to generate a relevant final `SKILL.md` under the caller's local `.agents/skills/<skill-name>/` directory.
 
 **Discovery strategy**:
 1. **Path sitemap** — for an entry like `https://zed.dev/docs/`, tries `https://zed.dev/docs/sitemap.xml`, `sitemap_index.xml`, and `sitemap-index.xml` (handles sitemap index files with nested children)
@@ -96,80 +96,30 @@ python3 ~/.agents/skills/crawl/scripts/crawl.py \
   --browser-cdp "/path/to/browser/profile"
 ```
 
-The script prints `CRAWL_COMPLETE|<skill_dir>|<page_count>` on successful crawl. Parse this to get the skill directory path and page count.
+The script prints `CRAWL_COMPLETE|<skill_dir>|<page_count>` after the markdown pages are written and Codex successfully rewrites `SKILL.md`. Parse this to get the skill directory path and page count.
 
 The script prints `CRAWL_CHECK|<page_count>` in check mode. Report the listed pages to the user if they asked to inspect discovery.
 
 If the script fails, report the error to the user and stop.
 
-**Requirements:** `beautifulsoup4` (`pip install beautifulsoup4`), Python 3.8+. If a compatible `markitdown` package is installed, the crawler uses it for higher-fidelity HTML conversion; otherwise it falls back to a built-in BeautifulSoup-based converter.
+**Requirements:** `beautifulsoup4` (`pip install beautifulsoup4`), Python 3.8+, Codex CLI, and the `skill-creator` skill at `~/.codex/skills/.system/skill-creator/SKILL.md`. Set `CRAWL_SKILL_CREATOR_PATH=/path/to/SKILL.md` to use a different `skill-creator` location. If a compatible `markitdown` package is installed, the crawler uses it for higher-fidelity HTML conversion; otherwise it falls back to a built-in BeautifulSoup-based converter.
 
 Automatic CDP fallback requires a Chrome/Chromium executable. In Codex Desktop, the crawler can usually reuse the bundled Playwright Chromium. Outside Codex, install Chrome/Chromium, run `playwright install chromium`, set `CRAWL_BROWSER_EXECUTABLE`, or pass `--browser-executable /path/to/chrome`.
 
 ---
 
-## Phase 2: Build the Skill (YOU do this)
+## Phase 2: Verify the Generated Skill
 
-The crawler already wrote a raw `SKILL.md` at `<skill_dir>/SKILL.md` with frontmatter and a flat page listing. Your job is to read the docs and rewrite it into a well-crafted skill.
+The crawler invokes Codex CLI with instructions to use `skill-creator`, read every crawled markdown file, and rewrite only `<skill_dir>/SKILL.md`. The generated `SKILL.md` must have frontmatter with only `name` and an intent-rich `description`; that description is the main trigger surface and should cover implicit user needs, not only direct product mentions.
 
-### Step 1: Read and understand the documentation
+After a successful run, inspect the generated `SKILL.md` briefly:
 
-1. Read `<skill_dir>/SKILL.md` to get the page listing
-2. Read a representative sample of the doc files (index, getting-started, key API pages) — enough to understand what the documentation covers, its structure, and its key topics
-3. For large doc sets (>30 pages), read at least 5-10 files spanning different sections
+- Confirm the description names the tool/domain, explains its utility, and includes likely implicit triggers.
+- Confirm Required Lookup appears before Contents.
+- Confirm Contents links point to existing markdown files.
+- Confirm no docs were pasted wholesale into `SKILL.md`.
 
-### Step 2: Rewrite SKILL.md
-
-Rewrite `<skill_dir>/SKILL.md` with the lookup workflow before the table of contents:
-
-```markdown
----
-name: {skill_name}
-description: "Documentation for {domain}. Use when the user asks about {skill_name}, references {domain}, or needs API docs, concepts, configuration, examples, migrations, troubleshooting, or guides from {base_url}. Trigger on mentions of '{skill_name}', '{domain}', or {key topics you identified}."
----
-
-# {Skill Title} Documentation
-
-> {page_count} pages from [{base_url}]({base_url})
-
-This `SKILL.md` is an index, not the full documentation. The actual docs are the linked markdown files in this skill folder.
-
-## Required Lookup
-
-When this skill triggers for a documentation question:
-
-1. Search this skill folder or choose the relevant entry from Contents.
-2. Read at least one linked `.md` file before answering API, syntax, configuration, behavior, migration, or troubleshooting questions.
-3. Read multiple files when the answer spans concepts, examples, reference pages, or framework integrations.
-4. Treat the local markdown files as the source of truth. If the local docs do not cover the question, say that instead of filling gaps from memory.
-
-## Overview
-
-{2-4 sentences summarizing what this documentation covers, what the tool/library does, and its main use cases. Written from reading the actual docs, not generic.}
-
-## Contents
-
-{hierarchical TOC — indented entries matching directory structure}
-{format each entry as: "- [Descriptive Title](relative/path.md)"}
-{use indentation (2 spaces per level) to show nesting}
-{group related pages under section headings when the structure is flat}
-
-## Search Hints
-
-- Use the Contents section when the topic maps cleanly to a page.
-- Use text search inside this skill folder when the topic could appear in many pages, for example `rg -n "<api-or-topic>" .`.
-- Prefer files with exact API names, component names, config keys, or error messages.
-```
-
-Key points:
-- The **description** field in frontmatter is critical — it determines when the skill triggers. Include the skill name, domain, and the key topics/keywords you identified from reading the docs.
-- The **Overview** should be specific to this documentation, not generic boilerplate.
-- The **Contents** TOC should use descriptive titles derived from reading the actual page content (first `#` heading), not just filename-to-title-case.
-- Organize the TOC hierarchically to match the doc structure.
-- Put **Required Lookup** before the overview and Contents so it is seen before the agent scans the page list.
-- Do not paste large chunks of docs into `SKILL.md`; keep it an index with strong retrieval instructions.
-
-### Step 3: Report
+## Report
 
 Tell the user:
 - Skill created at `<skill_dir>/`

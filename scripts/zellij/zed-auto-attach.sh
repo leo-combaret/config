@@ -26,6 +26,12 @@ _zed_auto_zellij_session_exists() {
   "$zellij_bin" list-sessions --short 2>/dev/null | grep -Fxq -- "$session"
 }
 
+_zed_auto_zellij_session_is_exited() {
+  local session="$1"
+  "$zellij_bin" list-sessions --no-formatting 2>/dev/null |
+    awk -v session="$session" '$1 == session && index($0, "(EXITED - attach to resurrect)") { found = 1 } END { exit found ? 0 : 1 }'
+}
+
 _zed_auto_zellij_session_has_clients() {
   local session="$1"
   "$zellij_bin" --session "$session" action list-clients 2>/dev/null |
@@ -68,6 +74,11 @@ _zed_auto_zellij() {
     if ! _zed_auto_zellij_session_exists "$session"; then
       break
     fi
+    if _zed_auto_zellij_session_is_exited "$session"; then
+      _zed_auto_zellij_log "skip exited session=$session pid=$$ pwd=$PWD"
+      ((index++))
+      continue
+    fi
     if ! _zed_auto_zellij_session_has_clients "$session"; then
       break
     fi
@@ -79,5 +90,5 @@ _zed_auto_zellij() {
 }
 
 _zed_auto_zellij
-unset -f _zed_auto_zellij _zed_auto_zellij_log _zed_auto_zellij_from_zed _zed_auto_zellij_session_exists _zed_auto_zellij_session_has_clients 2>/dev/null
+unset -f _zed_auto_zellij _zed_auto_zellij_log _zed_auto_zellij_from_zed _zed_auto_zellij_session_exists _zed_auto_zellij_session_is_exited _zed_auto_zellij_session_has_clients 2>/dev/null
 # <<< zed zellij auto-attach <<<

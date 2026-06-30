@@ -8,7 +8,8 @@ Flow:
   3. Discover links from SSR/static HTML sidebars/app payloads
   4. Merge all discovery results so partial sitemaps do not hide richer nav data
   5. Fetch each page, extract main content, convert to markdown via markitdown
-  6. Write .md files in a directory tree + a raw SKILL.md with page references
+  6. Write .md files in a directory tree
+  7. Ask Codex CLI, using skill-creator, to author the final SKILL.md
 
 Usage:
   python3 crawl.py <URL> [--name NAME] [--limit N]
@@ -1190,19 +1191,77 @@ EMBEDDED_SKIP_STRINGS = frozenset(
 def to_markdown(html_str):
     """Convert an HTML string to markdown using markitdown."""
     global _converter
+    normalized_html = normalize_code_blocks(html_str)
     if _converter is None:
         try:
             from markitdown import MarkItDown
         except (ImportError, AttributeError):
-            return html_to_markdown_basic(html_str)
+            return html_to_markdown_basic(normalized_html)
         _converter = MarkItDown()
 
-    stream = io.BytesIO(html_str.encode("utf-8"))
+    stream = io.BytesIO(normalized_html.encode("utf-8"))
     try:
         result = _converter.convert_stream(stream, file_extension=".html")
         return result.text_content
     except Exception:
-        return html_to_markdown_basic(html_str)
+        return html_to_markdown_basic(normalized_html)
+
+
+def is_code_line_element(node):
+    """Return True for syntax-highlighter wrappers representing one code line."""
+    classes = set(node.get("class") or [])
+    return (
+        "code-line" in classes
+        or "line" in classes
+        or node.has_attr("data-line")
+        or (node.has_attr("line") and "line-number" in classes)
+    )
+
+
+def top_level_code_line_elements(root):
+    """Find code line wrappers without returning nested line descendants."""
+    line_elements = []
+    line_ids = set()
+    for candidate in root.find_all(is_code_line_element):
+        if any(id(parent) in line_ids for parent in candidate.parents):
+            continue
+        line_elements.append(candidate)
+        line_ids.add(id(candidate))
+    return line_elements
+
+
+def extract_code_text(pre):
+    """Extract code text without inserting newlines between highlighted tokens."""
+    code_root = pre.find("code") or pre
+    line_elements = top_level_code_line_elements(code_root)
+    if line_elements:
+        return "\n".join(
+            "".join(line.strings).rstrip("\r\n").replace("\xa0", " ")
+            for line in line_elements
+        ).strip("\n")
+
+    for br in code_root.find_all("br"):
+        br.replace_with("\n")
+    return code_root.get_text("", strip=False).replace("\xa0", " ").strip("\n")
+
+
+def normalize_code_blocks(html_str):
+    """Flatten highlighted code blocks so markdown conversion preserves snippets."""
+    if not re.search(r"<pre(?:\s|>)", html_str, re.IGNORECASE):
+        return html_str
+
+    soup = make_soup(html_str)
+    changed = False
+    for pre in soup.find_all("pre"):
+        code = extract_code_text(pre)
+        if not code:
+            continue
+        code_el = soup.new_tag("code")
+        code_el.string = code
+        pre.clear()
+        pre.append(code_el)
+        changed = True
+    return str(soup) if changed else html_str
 
 
 def clean_inline_text(text):
@@ -1252,7 +1311,7 @@ def render_html_node(node, lines):
         return
 
     if name == "pre":
-        code = node.get_text("\n", strip=False).strip()
+        code = extract_code_text(node)
         if code:
             lines.extend(["```", code, "```"])
         return
@@ -2116,58 +2175,134 @@ def slugify_skill_name(name):
     return slug or "crawled-docs"
 
 
-def build_skill_md(skill_name, base_url, domain, pages):
-    """Generate a raw SKILL.md with frontmatter and page listing."""
-    lines = [
-        "---",
-        f"name: {skill_name}",
-        f'description: "Documentation for {domain}. Use when the user asks about {skill_name}, references {domain}, or needs API docs, concepts, configuration, examples, migrations, troubleshooting, or guides from {base_url}."',
-        "---",
-        "",
-        f"# {skill_name} Documentation",
-        "",
-        f"> {len(pages)} pages crawled from [{base_url}]({base_url})",
-        "",
-        "This `SKILL.md` is an index, not the full documentation. The actual docs are the linked markdown files in this skill folder.",
-        "",
-        "## Required Lookup",
-        "",
-        "When this skill triggers for a documentation question:",
-        "",
-        "1. Search this skill folder or choose the relevant entry from Contents.",
-        "2. Read at least one linked `.md` file before answering API, syntax, configuration, behavior, migration, or troubleshooting questions.",
-        "3. Read multiple files when the answer spans concepts, examples, reference pages, or framework integrations.",
-        "4. Treat the local markdown files as the source of truth. If the local docs do not cover the question, say that instead of filling gaps from memory.",
-        "",
-        "## Contents",
-        "",
+def default_skill_creator_path():
+    """Return the skill-creator SKILL.md path used by the Codex authoring step."""
+    configured = os.environ.get("CRAWL_SKILL_CREATOR_PATH")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".codex" / "skills" / ".system" / "skill-creator" / "SKILL.md"
+
+
+def build_skill_md_prompt(skill_name, base_url, domain, skill_dir, skill_creator_path, pages):
+    """Build the Codex CLI prompt for semantic SKILL.md authoring."""
+    page_list = "\n".join(f"- {page}" for page in sorted(pages))
+    skill_path = skill_dir / "SKILL.md"
+    return f"""Use $skill-creator at {skill_creator_path}.
+
+You are writing the final SKILL.md for a documentation skill generated by a crawler.
+
+Skill directory:
+{skill_dir}
+
+Target file to rewrite:
+{skill_path}
+
+Source documentation:
+- Base URL: {base_url}
+- Domain: {domain}
+- Skill name: {skill_name}
+- Crawled markdown files:
+{page_list}
+
+Required process:
+1. Read {skill_creator_path} completely and follow its SKILL.md guidance.
+2. Read every crawled markdown file listed above. Do not use the existing SKILL.md as source truth.
+3. Rewrite only {skill_path}. Do not edit the crawled markdown files and do not create README, changelog, agents/openai.yaml, scripts, references, or assets.
+
+SKILL.md requirements:
+- Frontmatter must contain only `name` and `description`.
+- `name` must be `{skill_name}`.
+- `description` must be a single-line quoted YAML value. It is the primary trigger surface. Make it intent-rich: describe what the documented tool/library/product is useful for, and include contexts where Codex should use this skill even when the user does not name `{skill_name}` explicitly. Mention concrete APIs, workflows, concepts, option names, integrations, or problem domains discovered from the crawled docs.
+- Body must be concise and structured as a retrieval index, not a documentation dump.
+- Put a Required Lookup section near the top telling future agents to read linked files before answering API, syntax, behavior, migration, troubleshooting, or example questions.
+- Include a specific overview based on the crawled docs.
+- Include a Contents section with relative links to the crawled markdown files, grouped by real topic/workflow when that is more useful than a flat list.
+- Include Search Hints with concrete terms useful for this documentation.
+- Preserve relative links exactly to existing files. Do not invent pages or APIs.
+"""
+
+
+def validate_generated_skill_md(skill_path, expected_name):
+    """Validate the minimum frontmatter required for a generated skill."""
+    try:
+        content = skill_path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise RuntimeError(f"could not read generated SKILL.md: {e}") from e
+
+    if not content.startswith("---\n"):
+        raise RuntimeError("generated SKILL.md is missing YAML frontmatter")
+
+    end = content.find("\n---", 4)
+    if end == -1:
+        raise RuntimeError("generated SKILL.md frontmatter is not closed")
+
+    frontmatter = content[4:end].strip().splitlines()
+    fields = {}
+    for line in frontmatter:
+        if ":" not in line:
+            raise RuntimeError(f"invalid frontmatter line: {line}")
+        key, value = line.split(":", 1)
+        fields[key.strip()] = value.strip().strip('"').strip("'")
+
+    extra_fields = set(fields) - {"name", "description"}
+    if extra_fields:
+        raise RuntimeError(
+            "generated SKILL.md has unsupported frontmatter field(s): "
+            + ", ".join(sorted(extra_fields))
+        )
+    if fields.get("name") != expected_name:
+        raise RuntimeError(
+            f"generated SKILL.md has name {fields.get('name')!r}, expected {expected_name!r}"
+        )
+    if not fields.get("description"):
+        raise RuntimeError("generated SKILL.md is missing a description")
+
+
+def write_skill_md_with_codex(skill_name, base_url, domain, skill_dir, pages):
+    """Ask Codex CLI to author SKILL.md from the crawled markdown files."""
+    codex = shutil.which("codex")
+    if not codex:
+        raise RuntimeError("codex CLI not found; cannot generate semantic SKILL.md")
+
+    skill_creator_path = default_skill_creator_path()
+    if not skill_creator_path.is_file():
+        raise RuntimeError(f"skill-creator not found at {skill_creator_path}")
+
+    prompt = build_skill_md_prompt(
+        skill_name,
+        base_url,
+        domain,
+        skill_dir,
+        skill_creator_path,
+        pages,
+    )
+
+    cmd = [
+        codex,
+        "exec",
+        "--ephemeral",
+        "-C",
+        str(skill_dir),
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "--add-dir",
+        str(skill_creator_path.parent),
+        "-",
     ]
 
-    # Group pages by directory for a hierarchical listing
-    dirs = {}
-    for filepath in sorted(pages):
-        parent = str(Path(filepath).parent)
-        if parent == ".":
-            parent = ""
-        dirs.setdefault(parent, []).append(filepath)
+    print("\nGenerating SKILL.md with Codex CLI and skill-creator...")
+    try:
+        result = subprocess.run(cmd, input=prompt, text=True, timeout=1800)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("codex CLI timed out while generating SKILL.md") from e
 
-    for dir_name in sorted(dirs.keys()):
-        if dir_name:
-            lines.append(f"### {dir_name}/")
-            lines.append("")
-        for filepath in dirs[dir_name]:
-            title = Path(filepath).stem.replace("-", " ").replace("_", " ").title()
-            lines.append(f"- [{title}]({filepath})")
-        lines.append("")
+    if result.returncode != 0:
+        raise RuntimeError(f"codex CLI failed with exit code {result.returncode}")
 
-    lines.append("## Search Hints")
-    lines.append("")
-    lines.append("- Use the Contents section when the topic maps cleanly to a page.")
-    lines.append('- Use text search inside this skill folder when the topic could appear in many pages, for example `rg -n "<api-or-topic>" .`.')
-    lines.append("- Prefer files with exact API names, component names, config keys, or error messages.")
-    lines.append("")
-
-    return "\n".join(lines)
+    skill_path = skill_dir / "SKILL.md"
+    validate_generated_skill_md(skill_path, skill_name)
+    print(f"\nSKILL.md written by Codex to {skill_path}")
 
 
 def parse_args(argv=None):
@@ -2427,10 +2562,11 @@ def main():
         print("ERROR: No pages were successfully crawled.")
         sys.exit(1)
 
-    skill_md = build_skill_md(skill_name, base_url, domain, pages)
-    skill_path = skill_dir / "SKILL.md"
-    skill_path.write_text(skill_md, encoding="utf-8")
-    print(f"\nSKILL.md written to {skill_path}")
+    try:
+        write_skill_md_with_codex(skill_name, base_url, domain, skill_dir, pages)
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
 
     print(f"\nCRAWL_COMPLETE|{skill_dir}|{len(pages)}")
 
